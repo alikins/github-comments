@@ -2,22 +2,82 @@
 
 from hashlib import md5
 import json
+import subprocess
 import re
 import sys
+
 
 from BeautifulSoup import BeautifulSoup
 import markdown
 import requests
 
+import pprint
+pp = pprint.pprint
 
 # clearly not the most rebust arg handling yet
-try:
-    user = sys.argv[1]
-    repo = sys.argv[2]
-    pull_request = sys.argv[3]
-except Exception:
-    print "usage: github-comments repo_name pr_number"
-    raise
+#try:
+#    user = sys.argv[1]
+#    repo = sys.argv[2]
+#    pull_request = sys.argv[3]
+#except Exception:
+#    print "usage: github-comments repo_name pr_number"
+#    raise
+
+
+# I love regular expressions:
+def find_github_repo():
+    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'], stdout=subprocess.PIPE)
+    git_config = process.communicate()[0]
+    config_lines = git_config.splitlines()
+    for config_line in config_lines:
+        if not config_line.startswith('remote.'):
+            continue
+        key, value = config_line.split('=', 1)
+        if not key.endswith('.url'):
+            continue
+        repo_url = value
+        repo_url_parts = repo_url.rsplit('/', 1)
+        repo_name_dot_git = repo_url_parts[-1]
+        if repo_name_dot_git.endswith('.git'):
+            repo_name = repo_name_dot_git[:-4]
+        else:
+            repo_name = repo_name_dot_git
+        owner_name = repo_url_parts[-2].split(':', 1)[1]
+        return repo_name, owner_name
+
+def get_branch_ref():
+    # we could just read and parse .git/HEAD
+    # needs to follow through to get upstream branch name
+    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'], stdout=subprocess.PIPE)
+    this_branch = process.communicate()[0]
+    return this_branch.strip()
+
+# git symbolic-ref HEAD
+#  (find ref name of current branch)
+# see remote-ref aliase in gitconfig
+#
+# or thisbranch/ rev-parse --abbrev-ref HEAD
+#
+# git config -l | grep ^remote | grep github
+#  (then parse url for owner/repo)
+#
+repo_name, repo_owner = find_github_repo()
+
+
+ref_name = get_branch_ref()
+
+r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
+prs = json.loads(r.text or r.content)
+pull_request_number = None
+for pr in prs:
+    pp(pr['head'])
+    # find the pull request that has match ref name
+    if pr['head']['ref'] == u'%s' % ref_name:
+        pull_request_number = pr['number']
+
+# see list of pull commits, including info about the ref of the branch
+# it was created for.
+# https://api.github.com/repos/candlepin/subscription-manager/pulls?open
 
 # set errorformat='%f:%l:%m,%E%f:%l:%m,%-Z%^%$
 
@@ -60,8 +120,12 @@ def gfm(text):
     return text
 
 
+if pull_request_number is None:
+    print "no pull requests found"
+    sys.exit()
+
 # github pull request comments api
-r = requests.get("https://api.github.com/repos/%s/%s/pulls/%s/comments" % (user, repo, pull_request))
+r = requests.get("https://api.github.com/repos/%s/%s/pulls/%s/comments" % (repo_owner, repo_name, pull_request_number))
 comments = json.loads(r.text or r.content)
 
 for comment in comments:
