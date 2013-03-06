@@ -1,14 +1,44 @@
 #!/usr/bin/python
 
+# show github pull request comments in a lint like format
+#
+# ala, pep8, jslint, etc, except for code review comments
+#
+# potentially useful to use with syntastic/flymake/etc
+#
+# Thoughts:
+#   - it would be nice if this was a minimal dep one file script
+#   - it would be nice if this could DWIM and find the approriate
+#     pull requests automatically
+#   - initial use case is "I have a local branch, that I've pushed
+#     to github, and isssued a pull request. I would like to see
+#     the per line code review comments for that pull request"
+#   - may eventually also support showing comments for arbitrary
+#     pull requests. for example, if you are reviewing a pull
+#     request, you could see the comments other have made
+#   - unsure what to do with the primary comments view...
+#     - anything that references a file could get it as a per file
+#       comment
+#     - at least tools like vim makeprg/errorformat/quicklist/make
+#       can deal with per project/branch config
+#   - it is a little tricky figuring out what the right pull request
+#     is, especially if local/remote ref names dont match, and there is
+#     no tracking branch. Should be able to find it by tracking donw
+#     the right sha's though
+
 from hashlib import md5
 import json
+# we could ditch the git subprocess probably
 import subprocess
 import re
 import sys
 
-
+# for parsing html into plain txt
 from BeautifulSoup import BeautifulSoup
+# for parsing markdown into html, since the comments use it
 import markdown
+# for http, though curl or even urllib will be okay
+# if we stick to a single file util concept
 import requests
 
 import pprint
@@ -24,7 +54,8 @@ pp = pprint.pprint
 #    raise
 
 
-# I love regular expressions:
+# I love regular expressions as much as the next guy, but
+# sometimes I just dont want to use them
 def find_github_repo():
     process = subprocess.Popen(['/usr/bin/git', 'config', '-l'], stdout=subprocess.PIPE)
     git_config = process.communicate()[0]
@@ -48,24 +79,16 @@ def find_github_repo():
 def get_branch_ref():
     # we could just read and parse .git/HEAD
     # needs to follow through to get upstream branch name
+    # see "remote-ref" aliase in my gitconfig for example
     process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'], stdout=subprocess.PIPE)
     this_branch = process.communicate()[0]
     return this_branch.strip()
 
-# git symbolic-ref HEAD
-#  (find ref name of current branch)
-# see remote-ref aliase in gitconfig
-#
-# or thisbranch/ rev-parse --abbrev-ref HEAD
-#
-# git config -l | grep ^remote | grep github
-#  (then parse url for owner/repo)
-#
 repo_name, repo_owner = find_github_repo()
-
 
 ref_name = get_branch_ref()
 
+# need repo_owner and repo_name to ask for the pull requests
 r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
 prs = json.loads(r.text or r.content)
 pull_request_number = None
