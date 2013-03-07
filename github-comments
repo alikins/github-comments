@@ -27,7 +27,6 @@
 #     the right sha's though
 
 from hashlib import md5
-import json
 # we could ditch the git subprocess probably
 import subprocess
 import re
@@ -48,6 +47,77 @@ repo_name = None
 repo_owner = None
 pull_request_number = None
 
+
+# I love regular expressions as much as the next guy, but
+# sometimes I just dont want to use them
+def find_github_repos():
+    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'], stdout=subprocess.PIPE)
+    git_config = process.communicate()[0]
+    config_lines = git_config.splitlines()
+    github_repos = []
+    for config_line in config_lines:
+        if not config_line.startswith("remote."):
+            continue
+        key, value = config_line.split('=', 1)
+        if not key.endswith('.url'):
+            continue
+        # verify this is a github repo
+        if 'github.com' not in value:
+            continue
+        repo_url = value
+        if repo_url.startswith("git@"):
+            repo_url_parts = repo_url.rsplit('/', 1)
+            name_dot_git = repo_url_parts[-1]
+            owner_name = repo_url_parts[-2].split(':', 1)[1]
+        elif repo_url.startswith("git://"):
+            repo_url_parts = repo_url.split('/')
+            name_dot_git = repo_url_parts[-1]
+            # can repo's have / in the name?
+            owner_name = repo_url_parts[-2]
+
+        # probably sombody with a foo.git/ reponame
+        if name_dot_git.endswith('.git'):
+            name = name_dot_git[:-4]
+        else:
+            name = name_dot_git
+        github_repos.append((owner_name, name))
+    return github_repos
+
+
+def get_branch_ref():
+    # we could just read and parse .git/HEAD
+    # needs to follow through to get upstream branch name
+    # see "remote-ref" alias in my gitconfig for example
+    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'], stdout=subprocess.PIPE)
+    this_branch = process.communicate()[0]
+    return this_branch.strip()
+
+
+def get_remote_branch_ref(local_ref):
+    # see if we have an "upstream" or merge ref
+    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--symbolic-full-name', 'HEAD@{u}'],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    remote_ref_long = process.communicate()[0]
+    print process.returncode
+    if process.returncode > 0:
+        return local_ref
+    remote_ref = remote_ref_long[len('/refs/heads/') + 1:]
+    print remote_ref
+    return remote_ref
+
+
+def find_pr_for_ref(ref_name):
+    # need repo_owner and repo_name to ask for the pull requests
+    r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
+    prs = r.json()
+
+    pull_request_number = None
+    for pr in prs:
+        # find the pull request that has match ref name
+        if pr['head']['ref'] == ref_name:
+            pull_request_number = pr['number']
+    return pull_request_number
+
 # clearly not the most rebust arg handling yet
 if len(sys.argv) > 1:
     try:
@@ -57,52 +127,13 @@ if len(sys.argv) > 1:
     except Exception:
         print "usage: github-comments repo_name pr_number"
         raise
+else:
+    # well then, let's guess!
+    repo_name, repo_owner = find_github_repo()
+    local_ref_name = get_branch_ref()
+    remote_ref_name = get_remote_branch_ref(local_ref_name)
 
-
-# I love regular expressions as much as the next guy, but
-# sometimes I just dont want to use them
-def find_github_repo():
-    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'], stdout=subprocess.PIPE)
-    git_config = process.communicate()[0]
-    config_lines = git_config.splitlines()
-    for config_line in config_lines:
-        if not config_line.startswith('remote.'):
-            continue
-        key, value = config_line.split('=', 1)
-        if not key.endswith('.url'):
-            continue
-        repo_url = value
-        repo_url_parts = repo_url.rsplit('/', 1)
-        name_dot_git = repo_url_parts[-1]
-        if name_dot_git.endswith('.git'):
-            name = name_dot_git[:-4]
-        else:
-            name = name_dot_git
-        owner_name = repo_url_parts[-2].split(':', 1)[1]
-        return name, owner_name
-
-def get_branch_ref():
-    # we could just read and parse .git/HEAD
-    # needs to follow through to get upstream branch name
-    # see "remote-ref" aliase in my gitconfig for example
-    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'], stdout=subprocess.PIPE)
-    this_branch = process.communicate()[0]
-    return this_branch.strip()
-
-repo_name, repo_owner = find_github_repo()
-
-ref_name = get_branch_ref()
-
-if pull_request_number is None:
-    # need repo_owner and repo_name to ask for the pull requests
-    r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
-    prs = json.loads(r.text or r.content)
-    pull_request_number = None
-    for pr in prs:
-        pp(pr['head'])
-        # find the pull request that has match ref name
-        if pr['head']['ref'] == u'%s' % ref_name:
-            pull_request_number = pr['number']
+    pull_request_number = find_pr_for_ref(remote_ref_name)
 
 # see list of pull commits, including info about the ref of the branch
 # it was created for.
@@ -116,6 +147,7 @@ if pull_request_number is None:
 def gfm(text):
     # Extract pre blocks.
     extractions = {}
+
     def pre_extraction_callback(matchobj):
         digest = md5(matchobj.group(0)).hexdigest()
         extractions[digest] = matchobj.group(0)
@@ -168,7 +200,6 @@ r = requests.get("https://api.github.com/repos/%s/%s/pulls/%s/comments" %
 comments = r.json()
 
 for comment in comments:
-    #pp(comment)
 
     body_text_gfm = comment['body']
     body_text_md = gfm(body_text_gfm)
@@ -180,5 +211,3 @@ for comment in comments:
 
     print "%s:%s:%s: %s" % (comment['path'], comment['position'], comment['user']['login'],
                             body_text)
-
-
