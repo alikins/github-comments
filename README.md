@@ -14,12 +14,19 @@ usage:
 output is of form:
 
 ```
-some/file.txt:1:billygit_user: I like this line alot!
-some/other/file.ps:123:some_user: This is a cool like
+some/file.txt:1:billygit_user:pr101: I like this line alot!
+some/other/file.ps:123:pr37:some_user: This is a cool like
 that continues across
 a lot of lines, that
-another/file.doc:1:billg: what?
+another/file.doc:1:billg:pr95: what?
 ```
+
+The fields are:
+- path to file
+- line number of the comment
+- which github user made the comment
+- the pull request number
+- the body of the comment, text'ified and possibly multiline
 
 Needs:
 - requests http://python-requests.org/
