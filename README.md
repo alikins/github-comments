@@ -6,12 +6,23 @@ show pull request comments in a lint like fashion
 It also attempts to find any review comments
 from pull requests that use the current HEAD.
 
-usage:
+Usage
+====
+
 ```
-./github-comments repouser reponame pull_request_number
+github-comments repouser reponame pull_request_number
 ```
 
-output is of form:
+or, if you are on a branch that has had pull requested
+from it:
+
+```
+github-comments
+```
+
+Output
+=====
+The output is of form:
 
 ```
 some/file.txt:1:billygit_user:pr37: I like this line alot!
@@ -28,9 +39,14 @@ The fields are:
 - the pull request number
 - the body of the comment, text'ified and possibly multiline
 
-Needs:
+Deps
+====
+
 - requests http://python-requests.org/
 - markdown https://pypi.python.org/pypi/Markdown
+
+Automatic Mode
+=============
 
 If no args are specified, it tries to guess
 which pull request to use. 
