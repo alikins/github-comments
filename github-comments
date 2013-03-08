@@ -235,7 +235,7 @@ def main():
     # set errorformat='%f:%l:%m,%E%f:%l:%m,%-Z%^%$
 
     if not pull_request_infos:
-        print "no pull requests found"
+        print "no open pull requests found"
         sys.exit()
 
     for pull_request_info in pull_request_infos:
