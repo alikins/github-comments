@@ -9,7 +9,7 @@ from pull requests that use the current HEAD.
 usage:
 ```
 ./github-comments repouser reponame pull_request_number
-'''
+```
 
 output is of form:
 
@@ -19,7 +19,7 @@ some/other/file.ps:123:some_user: This is a cool like
 that continues across
 a lot of lines, that
 another/file.doc:1:billg: what?
-'''
+```
 
 Needs:
 - requests http://python-requests.org/
