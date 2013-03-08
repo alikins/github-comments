@@ -1,32 +1,57 @@
 #!/usr/bin/python
 
+# show github pull request comments in a lint like format
+#
+# ala, pep8, jslint, etc, except for code review comments
+#
+# potentially useful to use with syntastic/flymake/etc
+#
+# Thoughts:
+#   - it would be nice if this was a minimal dep one file script
+#   - it would be nice if this could DWIM and find the approriate
+#     pull requests automatically
+#   - initial use case is "I have a local branch, that I've pushed
+#     to github, and isssued a pull request. I would like to see
+#     the per line code review comments for that pull request"
+#   - may eventually also support showing comments for arbitrary
+#     pull requests. for example, if you are reviewing a pull
+#     request, you could see the comments other have made
+#   - unsure what to do with the primary comments view...
+#     - anything that references a file could get it as a per file
+#       comment
+#     - at least tools like vim makeprg/errorformat/quicklist/make
+#       can deal with per project/branch config
+#   - it is a little tricky figuring out what the right pull request
+#     is, especially if local/remote ref names dont match, and there is
+#     no tracking branch. Should be able to find it by tracking donw
+#     the right sha's though
+
 from hashlib import md5
-import json
+# we could ditch the git subprocess probably
+import subprocess
 import re
 import sys
 
+# for parsing html into plain txt
 from BeautifulSoup import BeautifulSoup
+# for parsing markdown into html, since the comments use it
 import markdown
+# for http, though curl or even urllib will be okay
+# if we stick to a single file util concept
 import requests
 
-
-# clearly not the most rebust arg handling yet
-try:
-    user = sys.argv[1]
-    repo = sys.argv[2]
-    pull_request = sys.argv[3]
-except Exception:
-    print "usage: github-comments repo_name pr_number"
-    raise
-
-# set errorformat='%f:%l:%m,%E%f:%l:%m,%-Z%^%$
-
-
 # from from https://gist.github.com/gasman/856894
-# bundle here for convience
+# bundle here for lower deps, since it seems that
+# git hub api comment content types stuff doesnt work
+#
+# https://github.com/github/developer.github.com/commit/b6a782f74a4c1a1a28d3ac2bfddbea6f6ae4223c
+# seems to imply it was removed
+#
+
 def gfm(text):
     # Extract pre blocks.
     extractions = {}
+
     def pre_extraction_callback(matchobj):
         digest = md5(matchobj.group(0)).hexdigest()
         extractions[digest] = matchobj.group(0)
@@ -60,19 +85,162 @@ def gfm(text):
     return text
 
 
-# github pull request comments api
-r = requests.get("https://api.github.com/repos/%s/%s/pulls/%s/comments" % (user, repo, pull_request))
-comments = json.loads(r.text or r.content)
+# I love regular expressions as much as the next guy, but
+# sometimes I just dont want to use them
+def find_github_repos():
+    """Find remotes that are github, and find the repo name"""
+    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'], stdout=subprocess.PIPE)
+    git_config = process.communicate()[0]
+    config_lines = git_config.splitlines()
+    github_repos = set()
+    for config_line in config_lines:
+        if not config_line.startswith("remote."):
+            continue
+        key, value = config_line.split('=', 1)
+        if not key.endswith('.url'):
+            continue
+        # verify this is a github repo
+        if 'github.com' not in value:
+            continue
+        repo_url = value
+        if repo_url.startswith("git@"):
+            repo_url_parts = repo_url.rsplit('/', 1)
+            name_dot_git = repo_url_parts[-1]
+            owner_name = repo_url_parts[-2].split(':', 1)[1]
+        elif repo_url.startswith("git://"):
+            repo_url_parts = repo_url.split('/')
+            name_dot_git = repo_url_parts[-1]
+            # can repo's have / in the name?
+            owner_name = repo_url_parts[-2]
 
-for comment in comments:
-    body_text_gfm = comment['body']
-    body_text_md = gfm(body_text_gfm)
-    body_text_html = markdown.markdown(body_text_md)
-    body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
-
-    body_text = "\n".join(body_text_lines)
-
-    print "%s:%s:%s: %s" % (comment['path'], comment['position'], comment['user']['login'],
-                            body_text)
+        # probably sombody with a foo.git/ reponame
+        if name_dot_git.endswith('.git'):
+            name = name_dot_git[:-4]
+        else:
+            name = name_dot_git
+        github_repos.add((owner_name, name))
+    return github_repos
 
 
+def get_branch_ref():
+    # we could just read and parse .git/HEAD
+    # needs to follow through to get upstream branch name
+    # see "remote-ref" alias in my gitconfig for example
+    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'], stdout=subprocess.PIPE)
+    this_branch = process.communicate()[0]
+    return this_branch.strip()
+
+
+def get_remote_branch_ref(local_ref):
+    # see if we have an "upstream" or merge ref
+    branch_config_key = "branch.%s.merge" % local_ref
+    process = subprocess.Popen(['/usr/bin/git', 'config', '--get', branch_config_key],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    remote_merge_ref_full = process.communicate()[0]
+    remote_merge_ref_full.strip()
+
+    if process.returncode > 0:
+        sys.stderr.write("No merge ref found for %s\n (no config set for %s) " %
+                        (local_ref, branch_config_key))
+        return local_ref
+    # needs to skip remote name here as well
+    remote_ref = remote_merge_ref_full[len('refs/heads/'):]
+    return remote_ref.strip()
+
+
+def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
+    """Get all pull request for repo, and filter based on remote_ref_name"""
+
+    # need repo_owner and repo_name to ask for the pull requests
+    # TODO: cli arg to check closed pr's as well
+    r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
+    prs = r.json()
+
+    pull_request_info = []
+    for pr in prs:
+        # find the pull request that has match ref name
+        if pr['head']['ref'] == u'%s' % remote_ref_name:
+            pull_request_info.append((repo_owner, repo_name, pr['number']))
+    return pull_request_info
+
+
+def show_pull_request_comments(pull_request_info):
+    repo_owner, repo_name, pull_request_number = pull_request_info
+    url = "https://api.github.com/repos/%s/%s/pulls/%s/comments" % \
+        (repo_owner, repo_name, pull_request_number)
+
+    # I was hoping this would render the markdown to text, but that
+    # does not appear to be the case.
+    #headers = {'Accept': 'application/vnd.github.v3.text+json',
+    #           'User-Agent': 'git-comments via python requests'}
+
+    r = requests.get(url)
+    comments = r.json()
+
+    for comment in comments:
+        body_text_gfm = comment['body']
+        body_text_md = gfm(body_text_gfm)
+        body_text_html = markdown.markdown(body_text_md)
+        body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
+
+        body_text = "\n".join(body_text_lines)
+
+        print "%s:%s:%s:pr%s: %s" % (comment['path'], comment['original_position'],
+                                    comment['user']['login'], pull_request_number,
+                                    body_text)
+
+
+def main():
+    repo_name = None
+    repo_owner = None
+    pull_request_infos = []
+
+    # clearly not the most rebust arg handling yet
+    if len(sys.argv) > 1:
+        try:
+            repo_owner = sys.argv[1]
+            repo_name = sys.argv[2]
+            pull_request_number = sys.argv[3]
+            pull_request_infos.append((repo_owner, repo_name,
+                                       pull_request_number))
+        except Exception:
+            print "usage: github-comments repo_name pr_number"
+            raise
+    else:
+        # well then, let's guess!
+
+        # local branch name
+        local_ref_name = get_branch_ref()
+
+        # look up the merge ref, if we dont have one, skip it.
+        # we could probably take some guesss...
+        remote_ref_name = get_remote_branch_ref(local_ref_name)
+
+        # lets find all the github repo's this could be a branch of,
+        # ignoring multiple remote names for the same repo
+        github_repos = find_github_repos()
+
+        for github_repo in github_repos:
+            repo_owner, repo_name = github_repo
+
+            # does it make sense to support multiple per requests per
+            # branch? Suppose you can push a branch to a fork, and then
+            # make multiple pull requests to different upstreams?
+            pull_request_infos += find_pr_for_ref(repo_owner, repo_name, remote_ref_name)
+
+    # see list of pull commits, including info about the ref of the branch
+    # it was created for.
+    # https://api.github.com/repos/candlepin/subscription-manager/pulls?open
+
+    # set errorformat='%f:%l:%m,%E%f:%l:%m,%-Z%^%$
+
+    if not pull_request_infos:
+        print "no pull requests found"
+        sys.exit()
+
+    for pull_request_info in pull_request_infos:
+        show_pull_request_comments(pull_request_info)
+
+
+if __name__ == "__main__":
+    main()
