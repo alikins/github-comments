@@ -57,4 +57,18 @@ To get automatic mode to work, you need:
 - The merge url needs to be a github repo
 - The repo needs to have open pull requests against it
 
+Using with Vim
+==============
+
+github-comments can be used as a "makeprg" file to
+generate a list of errors/warnings to investigate. 
+
+in vim, set makeprg to github-comments
+```
+    :set makeprg=github-comments
+```
+
+Invoking ':make' or similar will use the output
+as an errorlist. 
+
 
