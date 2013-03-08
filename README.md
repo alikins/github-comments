@@ -14,11 +14,11 @@ usage:
 output is of form:
 
 ```
-some/file.txt:1:billygit_user:pr101: I like this line alot!
+some/file.txt:1:billygit_user:pr37: I like this line alot!
 some/other/file.ps:123:pr37:some_user: This is a cool like
 that continues across
 a lot of lines, that
-another/file.doc:1:billg:pr95: what?
+another/file.doc:1:billg:pr37: what?
 ```
 
 The fields are:
