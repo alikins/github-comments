@@ -65,6 +65,7 @@ def find_github_repos():
         if 'github.com' not in value:
             continue
         repo_url = value
+        remote_name = key.split('.')[1]
         if repo_url.startswith("git@"):
             repo_url_parts = repo_url.rsplit('/', 1)
             name_dot_git = repo_url_parts[-1]
@@ -80,7 +81,7 @@ def find_github_repos():
             name = name_dot_git[:-4]
         else:
             name = name_dot_git
-        github_repos.append((owner_name, name))
+        github_repos.append((remote_name, owner_name, name))
     return github_repos
 
 
@@ -93,30 +94,32 @@ def get_branch_ref():
     return this_branch.strip()
 
 
-def get_remote_branch_ref(local_ref):
-    # see if we have an "upstream" or merge ref
+def get_remote_branch_ref(local_ref, remote_name):
+# see if we have an "upstream" or merge ref
     process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--symbolic-full-name', 'HEAD@{u}'],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     remote_ref_long = process.communicate()[0]
-    print process.returncode
+    sys.stderr.write("rev-parse failed ret code: %s\n" % process.returncode)
     if process.returncode > 0:
         return local_ref
-    remote_ref = remote_ref_long[len('/refs/heads/') + 1:]
-    print remote_ref
-    return remote_ref
+    # needs to skip remote name here as well
+    remote_ref = remote_ref_long[len('/refs/heads/%s/' % remote_name) + 1:]
+    return remote_ref.strip()
 
 
 def find_pr_for_ref(ref_name):
     # need repo_owner and repo_name to ask for the pull requests
-    r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
+    r = requests.get("https://api.github.com/repos/%s/%s/pulls" % (repo_owner, repo_name))
     prs = r.json()
 
-    pull_request_number = None
+    pull_request_numbers = []
     for pr in prs:
         # find the pull request that has match ref name
-        if pr['head']['ref'] == ref_name:
-            pull_request_number = pr['number']
-    return pull_request_number
+        pp(pr['head'])
+        print pr['head']['ref'], ref_name
+        if pr['head']['ref'] == u'%s' % ref_name:
+            pull_request_numbers.append(pr['number'])
+    return pull_request_numbers
 
 # clearly not the most rebust arg handling yet
 if len(sys.argv) > 1:
@@ -129,11 +132,17 @@ if len(sys.argv) > 1:
         raise
 else:
     # well then, let's guess!
-    repo_name, repo_owner = find_github_repo()
+    github_repos = find_github_repos()
+    sys.stderr.write("github_repos: %s\n" % github_repos)
+    remote_name, repo_owner, repo_name = github_repos[0]
+    sys.stderr.write("name: %s\n owner: %s\n repo: %s\n" % (remote_name, repo_owner, repo_name))
     local_ref_name = get_branch_ref()
-    remote_ref_name = get_remote_branch_ref(local_ref_name)
+    sys.stderr.write("local ref: %s\n" % local_ref_name)
+    remote_ref_name = get_remote_branch_ref(local_ref_name, remote_name)
 
-    pull_request_number = find_pr_for_ref(remote_ref_name)
+    # does it make sense to support multiple per requests per
+    # branch?
+    pull_request_numbers = find_pr_for_ref(remote_ref_name)
 
 # see list of pull commits, including info about the ref of the branch
 # it was created for.
@@ -181,7 +190,7 @@ def gfm(text):
     return text
 
 
-if pull_request_number is None:
+if not pull_request_numbers:
     print "no pull requests found"
     sys.exit()
 
@@ -194,20 +203,26 @@ if pull_request_number is None:
 #headers = {'Accept': 'application/vnd.github.v3.text+json',
 #           'User-Agent': 'git-comments via python requests'}
 
-r = requests.get("https://api.github.com/repos/%s/%s/pulls/%s/comments" %
-                 (repo_owner, repo_name, pull_request_number))
+
+def show_pull_request_comments(pull_request_number):
+    r = requests.get("https://api.github.com/repos/%s/%s/pulls/%s/comments" %
+                     (repo_owner, repo_name, pull_request_number))
 #                 headers=headers)
-comments = r.json()
+    comments = r.json()
 
-for comment in comments:
+    for comment in comments:
+        #pp(comment)
+        body_text_gfm = comment['body']
+        body_text_md = gfm(body_text_gfm)
+        body_text_html = markdown.markdown(body_text_md)
+        body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
 
-    body_text_gfm = comment['body']
-    body_text_md = gfm(body_text_gfm)
-    body_text_html = markdown.markdown(body_text_md)
-    body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
+        body_text = "\n".join(body_text_lines)
+        #body_text = comment['body']
 
-    body_text = "\n".join(body_text_lines)
-    #body_text = comment['body']
+        print "%s:%s:%s:pr%s: %s" % (comment['path'], comment['original_position'],
+                                      comment['user']['login'], pull_request_number,
+                                      body_text)
 
-    print "%s:%s:%s: %s" % (comment['path'], comment['position'], comment['user']['login'],
-                            body_text)
+for pull_request_number in pull_request_numbers:
+    show_pull_request_comments(pull_request_number)
