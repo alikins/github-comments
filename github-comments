@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/local/bin/python
 
 # show github pull request comments in a lint like format
 #
@@ -28,6 +28,7 @@
 
 from hashlib import md5
 # we could ditch the git subprocess probably
+import operator
 import subprocess
 import re
 import sys
@@ -41,12 +42,13 @@ import markdown
 import requests
 
 # from from https://gist.github.com/gasman/856894
-# bundle here for lower deps, since it seems that
 # git hub api comment content types stuff doesnt work
+# bundle here for lower deps, since it seems that
 #
 # https://github.com/github/developer.github.com/commit/b6a782f74a4c1a1a28d3ac2bfddbea6f6ae4223c
 # seems to imply it was removed
 #
+
 
 def gfm(text):
     # Extract pre blocks.
@@ -163,8 +165,23 @@ def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
             pull_request_info.append((repo_owner, repo_name, pr['number']))
     return pull_request_info
 
+import pprint
+pp = pprint.pprint
 
-def show_pull_request_comments(pull_request_info):
+def get_url(url):
+    r = requests.get(url)
+    #pp(r.links)
+    #next_link = r.links['next']
+    #last_link = r.links['last']
+    #print "next", next_link
+    #print "last", last_link
+    if 'next' in r.links:
+        next_comments =  get_url(r.links['next']['url'])
+        appended = r.json() + next_comments
+        return appended
+    return r.json()
+
+def get_pull_request_comments(pull_request_info):
     repo_owner, repo_name, pull_request_number = pull_request_info
     url = "https://api.github.com/repos/%s/%s/pulls/%s/comments" % \
         (repo_owner, repo_name, pull_request_number)
@@ -174,9 +191,24 @@ def show_pull_request_comments(pull_request_info):
     #headers = {'Accept': 'application/vnd.github.v3.text+json',
     #           'User-Agent': 'git-comments via python requests'}
 
-    r = requests.get(url)
-    comments = r.json()
+    r_comments = get_url(url)
+#    print "# comments: %s" % len(r_comments)
+    show_pull_request_comments(r_comments, repo_owner,
+                               repo_name, pull_request_number)
 
+def show_pull_request_comments(comments, repo_owner, repo_name,
+                               pull_request_number):
+    #comments = r.json()
+#    print "# comments: %s" % len(comments)
+    # unified diff chunk header
+    pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
+    # lets sort the comments by path
+    # we probably want to eventually subsort on computed line offset,
+    # and to put the comments in order they were added
+    #  so we probably need to figure out the comments and store
+    # the order based on the computer stuff, then walk over them
+    # again and display
+    comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
         body_text_gfm = comment['body']
         body_text_md = gfm(body_text_gfm)
@@ -185,6 +217,54 @@ def show_pull_request_comments(pull_request_info):
 
         body_text = "\n".join(body_text_lines)
 
+#        print comment['path']
+        op = int(comment['original_position'])
+        if comment['position']:
+            p = int(comment['position'])
+        else:
+            # outdate diff
+            continue
+        vc = ['src/main/java/org/candlepin/resource/RulesResource.java',
+              'src/main/java/org/candlepin/policy/js/pool/PoolRules.java']
+#        if comment['path'] in vc:
+#            pp(comment)
+
+        diff_hunk = comment['diff_hunk']
+        diff_hunk_lines = diff_hunk.splitlines()
+        diff_hunk_header = diff_hunk_lines[0]
+        matches = pattern.match(diff_hunk_header)
+        if matches:
+            groups = matches.groups()
+            new_start = groups[2]
+            new_size = groups[3]
+#            print "op", op, "p",  p, "new_start", new_start, "new_size", new_size
+        count = 0
+
+        # FIXME: move to method
+        comment_line = int(new_start)
+        for line in comment['diff_hunk'].splitlines():
+            if line[0] == '-':
+                pass
+                #comment_line -= 1
+            elif line[0] == '+':
+                comment_line += 1
+            else:
+                comment_line += 1
+
+#            if p == op:
+#                if count == p:
+#                    print "[p op %s] " % comment_line,
+#            else:
+#                if count == op:
+#                    print "[op %s] " % comment_line,
+#                if count == p:
+#                    print "[p %s] " % comment_line,
+#            print "%s %s: %s" % (count, comment_line, line)
+#            if count == p or count == op:
+#                print " -=| \" %s \" |=-" % body_text
+            count += 1
+
+        # this is less broken now
         # FIXME: this is broken. The position/original_postion in the review
         # comment json is not the position in the patched file, but just the
         # position in the diff hunk itself.
@@ -193,7 +273,7 @@ def show_pull_request_comments(pull_request_info):
         # of the diff, and figure out the right offset for the comment from
         # there. hopefully just counting newlines and +/-'s can get us close
         # enough
-        print "%s:%s:%s:pr%s: %s" % (comment['path'], comment['original_position'],
+        print "%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
                                     comment['user']['login'], pull_request_number,
                                     body_text)
 
@@ -247,7 +327,7 @@ def main():
         sys.exit()
 
     for pull_request_info in pull_request_infos:
-        show_pull_request_comments(pull_request_info)
+        get_pull_request_comments(pull_request_info)
 
 
 if __name__ == "__main__":
