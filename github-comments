@@ -49,6 +49,8 @@ import requests
 # seems to imply it was removed
 #
 
+# regex for parsing a diff hunk header and finding the offsets and sizes
+diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 
 def gfm(text):
     # Extract pre blocks.
@@ -168,13 +170,65 @@ def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
 import pprint
 pp = pprint.pprint
 
+# given comment object, figure out which lines of the
+# new file the comment corresponds to. Involves a little
+# of parsing a diff (reading the hunk header, and keeping
+# track of insertions and deletions)
+def find_comment_line(comment):
+    """returns line of latest version of file that comment applies to.
+
+    Returns an int linenumber if the comment applies, None
+    otherwise
+    """
+    op = int(comment['original_position'])
+    if comment['position']:
+        p = int(comment['position'])
+    else:
+        # outdated diff
+        return None
+#    vc = ['src/main/java/org/candlepin/resource/RulesResource.java',
+#            'src/main/java/org/candlepin/policy/js/pool/PoolRules.java']
+#        if comment['path'] in vc:
+#            pp(comment)
+
+    diff_hunk = comment['diff_hunk']
+    diff_hunk_lines = diff_hunk.splitlines()
+    diff_hunk_header = diff_hunk_lines[0]
+    matches = diff_hunk_pattern.match(diff_hunk_header)
+    if matches:
+        groups = matches.groups()
+        new_start = groups[2]
+        new_size = groups[3]
+        # print "op", op, "p",  p, "new_start", new_start, "new_size", new_size
+
+    count = 0
+    comment_line = int(new_start)
+    for line in comment['diff_hunk'].splitlines():
+        if line[0] == '-':
+            pass
+            #comment_line -= 1
+        elif line[0] == '+':
+            comment_line += 1
+        else:
+            comment_line += 1
+
+#       if p == op:
+#           if count == p:
+#               print "[p op %s] " % comment_line,
+#       else:
+#           if count == op:
+#               print "[op %s] " % comment_line,
+#           if count == p:
+#               print "[p %s] " % comment_line,
+#       print "%s %s: %s" % (count, comment_line, line)
+#       if count == p or count == op:
+#           print " -=| \" %s \" |=-" % body_text
+        count += 1
+    return comment_line
+
+# support github api pagination
 def get_url(url):
     r = requests.get(url)
-    #pp(r.links)
-    #next_link = r.links['next']
-    #last_link = r.links['last']
-    #print "next", next_link
-    #print "last", last_link
     if 'next' in r.links:
         next_comments =  get_url(r.links['next']['url'])
         appended = r.json() + next_comments
@@ -201,7 +255,6 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
     #comments = r.json()
 #    print "# comments: %s" % len(comments)
     # unified diff chunk header
-    pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
     # lets sort the comments by path
     # we probably want to eventually subsort on computed line offset,
     # and to put the comments in order they were added
@@ -217,53 +270,10 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
 
         body_text = "\n".join(body_text_lines)
 
-#        print comment['path']
-        op = int(comment['original_position'])
-        if comment['position']:
-            p = int(comment['position'])
-        else:
-            # outdate diff
+        comment_line = find_comment_line(comment)
+        if comment_line is None:
+            # no comment applies
             continue
-        vc = ['src/main/java/org/candlepin/resource/RulesResource.java',
-              'src/main/java/org/candlepin/policy/js/pool/PoolRules.java']
-#        if comment['path'] in vc:
-#            pp(comment)
-
-        diff_hunk = comment['diff_hunk']
-        diff_hunk_lines = diff_hunk.splitlines()
-        diff_hunk_header = diff_hunk_lines[0]
-        matches = pattern.match(diff_hunk_header)
-        if matches:
-            groups = matches.groups()
-            new_start = groups[2]
-            new_size = groups[3]
-#            print "op", op, "p",  p, "new_start", new_start, "new_size", new_size
-        count = 0
-
-        # FIXME: move to method
-        comment_line = int(new_start)
-        for line in comment['diff_hunk'].splitlines():
-            if line[0] == '-':
-                pass
-                #comment_line -= 1
-            elif line[0] == '+':
-                comment_line += 1
-            else:
-                comment_line += 1
-
-#            if p == op:
-#                if count == p:
-#                    print "[p op %s] " % comment_line,
-#            else:
-#                if count == op:
-#                    print "[op %s] " % comment_line,
-#                if count == p:
-#                    print "[p %s] " % comment_line,
-#            print "%s %s: %s" % (count, comment_line, line)
-#            if count == p or count == op:
-#                print " -=| \" %s \" |=-" % body_text
-            count += 1
-
         # this is less broken now
         # FIXME: this is broken. The position/original_postion in the review
         # comment json is not the position in the patched file, but just the
