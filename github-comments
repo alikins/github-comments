@@ -185,6 +185,14 @@ def show_pull_request_comments(pull_request_info):
 
         body_text = "\n".join(body_text_lines)
 
+        # FIXME: this is broken. The position/original_postion in the review
+        # comment json is not the position in the patched file, but just the
+        # position in the diff hunk itself.
+        #
+        # We should be able to parse the diff enough to get the starting offset
+        # of the diff, and figure out the right offset for the comment from
+        # there. hopefully just counting newlines and +/-'s can get us close
+        # enough
         print "%s:%s:%s:pr%s: %s" % (comment['path'], comment['original_position'],
                                     comment['user']['login'], pull_request_number,
                                     body_text)
