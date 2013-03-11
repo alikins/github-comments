@@ -200,19 +200,34 @@ def find_comment_line(comment):
         groups = matches.groups()
         new_start = groups[2]
         new_size = groups[3]
-        # print "op", op, "p",  p, "new_start", new_start, "new_size", new_size
+        #print "op", op, "p",  p, "new_start", new_start, "new_size", new_size
 
+    # trying to figure out which line the comment should be associated
+    # with. for simple diffs, it seems ok, but for more complicated diffs
+    # with multiple chunks, it seems like we are missing infomation. The
+    # comment json has 'position' and 'original_position', which are
+    # basically the line numbers of the diff that the comment is for. But,
+    # the comment's 'diff_hunk' is only part of the diff. So if the
+    # preceding hunk doesn't have a comment, we can't count correctly
+    # because we dont know it's size. It seems like the position info
+    # in the comment data isn't particular useful for these cases.
+    # maybe the api for particular comments is better? It would be
+    # nice not to have to get each comment, or even each commit diff
+    # at a time though.
     count = 0
     comment_line = int(new_start)
-    for line in comment['diff_hunk'].splitlines():
+    for line in diff_hunk_lines[1:]:
         if line[0] == '-':
             pass
+            #continue
             #comment_line -= 1
         elif line[0] == '+':
             comment_line += 1
         else:
             comment_line += 1
 
+        if count >= p:
+            break
 #       if p == op:
 #           if count == p:
 #               print "[p op %s] " % comment_line,
