@@ -151,6 +151,18 @@ def get_remote_branch_ref(local_ref):
     remote_ref = remote_merge_ref_full[len('refs/heads/'):]
     return remote_ref.strip()
 
+def compare_commits(repo_owner, repo_name, base_sha1, head_sha1):
+    url = "https://api.github.com/repos/%s/%s/compare/%s...%s" % \
+            (repo_owner, repo_name, base_sha1, head_sha1)
+    results = get_url(url)
+    for file_data in results['files']:
+        if file_data['filename'] != "src/main/java/org/candlepin/resource/RulesResource.java":
+            continue
+        print "filename: %s" % file_data['filename']
+        print "patch:"
+        print file_data['patch']
+        print
+
 
 def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
     """Get all pull request for repo, and filter based on remote_ref_name"""
@@ -165,6 +177,9 @@ def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
         # find the pull request that has match ref name
         if pr['head']['ref'] == u'%s' % remote_ref_name:
             pull_request_info.append((repo_owner, repo_name, pr['number']))
+            compare_commits(repo_owner, repo_name,
+                            pr['base']['sha'],
+                            pr['head']['sha'])
     return pull_request_info
 
 import pprint
