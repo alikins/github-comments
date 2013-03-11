@@ -29,8 +29,8 @@
 from hashlib import md5
 # we could ditch the git subprocess probably
 import operator
-import subprocess
 import re
+import subprocess
 import sys
 
 # for parsing html into plain txt
@@ -170,6 +170,7 @@ def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
 import pprint
 pp = pprint.pprint
 
+
 # given comment object, figure out which lines of the
 # new file the comment corresponds to. Involves a little
 # of parsing a diff (reading the hunk header, and keeping
@@ -226,14 +227,16 @@ def find_comment_line(comment):
         count += 1
     return comment_line
 
+
 # support github api pagination
 def get_url(url):
     r = requests.get(url)
     if 'next' in r.links:
-        next_comments =  get_url(r.links['next']['url'])
+        next_comments = get_url(r.links['next']['url'])
         appended = r.json() + next_comments
         return appended
     return r.json()
+
 
 def get_pull_request_comments(pull_request_info):
     repo_owner, repo_name, pull_request_number = pull_request_info
@@ -250,30 +253,37 @@ def get_pull_request_comments(pull_request_info):
     show_pull_request_comments(r_comments, repo_owner,
                                repo_name, pull_request_number)
 
+
+def format_comment_body(comment):
+    body_text_gfm = comment['body']
+    body_text_md = gfm(body_text_gfm)
+    body_text_html = markdown.markdown(body_text_md)
+    body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
+
+    body_text = "\n".join(body_text_lines)
+    return body_text
+
+
 def show_pull_request_comments(comments, repo_owner, repo_name,
                                pull_request_number):
-    #comments = r.json()
 #    print "# comments: %s" % len(comments)
     # unified diff chunk header
     # lets sort the comments by path
     # we probably want to eventually subsort on computed line offset,
     # and to put the comments in order they were added
     #  so we probably need to figure out the comments and store
-    # the order based on the computer stuff, then walk over them
+    # the order based on the computed stuff, then walk over them
     # again and display
+    # sort by file path
     comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
-        body_text_gfm = comment['body']
-        body_text_md = gfm(body_text_gfm)
-        body_text_html = markdown.markdown(body_text_md)
-        body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
-
-        body_text = "\n".join(body_text_lines)
-
+    #    pp(comment)
         comment_line = find_comment_line(comment)
         if comment_line is None:
             # no comment applies
             continue
+
+        body_text = format_comment_body(comment)
         # this is less broken now
         # FIXME: this is broken. The position/original_postion in the review
         # comment json is not the position in the patched file, but just the
@@ -284,8 +294,8 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
         # there. hopefully just counting newlines and +/-'s can get us close
         # enough
         print "%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
-                                    comment['user']['login'], pull_request_number,
-                                    body_text)
+                                     comment['user']['login'], pull_request_number,
+                                     body_text)
 
 
 def main():
