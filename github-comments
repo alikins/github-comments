@@ -56,24 +56,25 @@ import requests
 diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 
 DEBUG = False
-
 cfg = None
+
 
 class PullRequest(object):
     def __init__(self, repo_owner, repo_name,
-                 pr_number, diffs=None):
+                 pr_number, diffs=None, data=None):
         self.repo_owner = repo_owner
         self.repo_name = repo_name
         self.pr_number = pr_number
         self.diffs = diffs
+        self.data = data
 
     @classmethod
     def create_by_number(cls, repo_owner, repo_name, pr_number):
-        url = "htps://api.github.com/repos/%s/%s/pulls/%s" % (repo_owner,
+        url = "https://api.github.com/repos/%s/%s/pulls/%s" % (repo_owner,
                                                               repo_name,
                                                               pr_number)
         pr = get_url(url, auth=get_auth())
-        return cls(repo_owner, repo_name, pr['number'])
+        return cls(repo_owner, repo_name, pr['number'], data=pr)
 
 
 class PullRequestList(object):
@@ -87,7 +88,6 @@ class PullRequestList(object):
         # TODO: cli arg to check closed pr's as well
         url = "https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name)
         prs = get_url(url, auth=get_auth())
-
 
         for pr in prs:
             # find the pull request that has match ref name
@@ -105,8 +105,8 @@ class PullRequestList(object):
     def add_pr_by_number(self, repo_owner, repo_name, pr_number):
         pr = PullRequest.create_by_number(repo_owner, repo_name, pr_number)
         file_to_diff = compare_commits(repo_owner, repo_name,
-                                       pr['base']['sha'],
-                                       pr['head']['sha'])
+                                       pr.data['base']['sha'],
+                                       pr.data['head']['sha'])
         pr.diffs = file_to_diff
         self.prs.append(pr)
 
@@ -377,9 +377,9 @@ def main():
             repo_owner = sys.argv[1]
             repo_name = sys.argv[2]
             pull_request_number = sys.argv[3]
-            pull_requests.add_by_number(repo_owner,
-                                        repo_name,
-                                        pull_request_number)
+            pull_requests.add_pr_by_number(repo_owner,
+                                           repo_name,
+                                           pull_request_number)
         except Exception:
             print "usage: github-comments repo_name pr_number"
             raise
