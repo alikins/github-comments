@@ -54,6 +54,8 @@ import requests
 # regex for parsing a diff hunk header and finding the offsets and sizes
 diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 
+DEBUG=False
+
 def gfm(text):
     # Extract pre blocks.
     extractions = {}
@@ -215,7 +217,7 @@ def find_comment_line(comment, file_to_diff):
 
     diff_hunk = file_to_diff[comment['path']]
     diff_hunk_lines = diff_hunk.splitlines()
-        # The position index is against the full diff, not just the hunk
+    # The position index is against the full diff, not just the hunk
     # but we want to compute final line. new approach...
     # - go to 'position' offset, then count backwards till we hit
     # a chunk header, then parse the header line to find this chunks
@@ -239,40 +241,12 @@ def find_comment_line(comment, file_to_diff):
     comment_line = int(new_start) + count
     return comment_line
 
-#    count = 0
-    #comment_line = int(new_start)
-    #for line in diff_hunk_lines[1:]:
-        #if line[0] == '-':
-            #pass
-            ##continue
-##            comment_line -= 1
-        #elif line[0] == '+':
-            #comment_line += 1
-        #else:
-            #comment_line += 1
-
-        #if count >= p:
-            #break
-##        if p == op:
-##            if count == p:
-##               print "[p op %s] " % comment_line,
-##        else:
-##            if count == op:
-##                print "[op %s] " % comment_line,
-##            if count == p:
-##                print "[p %s] " % comment_line,
-##        print "%s %s: %s" % (count, comment_line, line)
-##        if count == p or count == op:
-##            print " -=| \" %s \" |=-" % comment['body']
-        #count += 1
-    ##print "cl: %s" % comment_line
-    #return comment_line
-
 
 # support github api pagination
 def get_url(url, auth):
     r = requests.get(url, auth=auth)
-    sys.stderr.write("%s:%s\n" % (url, r.status_code))
+    if DEBUG:
+        sys.stderr.write("%s:%s\n" % (url, r.status_code))
     if 'next' in r.links:
         next_comments = get_url(r.links['next']['url'], auth=auth)
         appended = r.json() + next_comments
@@ -282,7 +256,8 @@ def get_url(url, auth):
 # support github api pagination
 def get_url_dict(url, auth):
     r = requests.get(url, auth=auth)
-    sys.stderr.write("%s:%s\n" % (url, r.status_code))
+    if DEBUG:
+        sys.stderr.write("%s:%s\n" % (url, r.status_code))
     if 'next' in r.links:
         #print "next link: ", r.links['next']['url']
         next_data = get_url(r.links['next']['url'], auth=auth)
@@ -303,7 +278,6 @@ def get_pull_request_comments(pull_request_info):
     #           'User-Agent': 'git-comments via python requests'}
 
     r_comments = get_url(url, auth=get_auth())
-#    print "# comments: %s" % len(r_comments)
     show_pull_request_comments(r_comments, repo_owner,
                                repo_name, pull_request_number,
                                file_to_diff)
@@ -316,13 +290,11 @@ def format_comment_body(comment):
     body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
 
     body_text = "\n".join(body_text_lines)
-    return ''
-#    return body_text
+    return body_text
 
 
 def show_pull_request_comments(comments, repo_owner, repo_name,
                                pull_request_number, file_to_diff):
-#    print "# comments: %s" % len(comments)
     # unified diff chunk header
     # lets sort the comments by path
     # we probably want to eventually subsort on computed line offset,
@@ -333,7 +305,6 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
     # sort by file path
     comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
-    #    pp(comment)
         comment_line = find_comment_line(comment, file_to_diff)
         if comment_line is None:
             # no comment applies
@@ -353,13 +324,15 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
                                      comment['user']['login'], pull_request_number,
                                      body_text)
 
-#FIXME
+#FIXME, turn on basic auth just to not get rate limited so
+# much for testing. Need to add oauth support
 def get_auth():
     cfg = ConfigParser.ConfigParser()
     cfg.read(os.path.expanduser("~/.github-comments"))
     user = cfg.get("main", "username")
     password = cfg.get("main", "password")
     return user, password
+
 
 def main():
     repo_name = None
