@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+import types
 
 # for parsing html into plain txt
 from BeautifulSoup import BeautifulSoup
@@ -54,7 +55,61 @@ import requests
 # regex for parsing a diff hunk header and finding the offsets and sizes
 diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 
-DEBUG=False
+DEBUG = False
+
+cfg = None
+
+class PullRequest(object):
+    def __init__(self, repo_owner, repo_name,
+                 pr_number, diffs=None):
+        self.repo_owner = repo_owner
+        self.repo_name = repo_name
+        self.pr_number = pr_number
+        self.diffs = diffs
+
+    @classmethod
+    def create_by_number(cls, repo_owner, repo_name, pr_number):
+        url = "htps://api.github.com/repos/%s/%s/pulls/%s" % (repo_owner,
+                                                              repo_name,
+                                                              pr_number)
+        pr = get_url(url, auth=get_auth())
+        return cls(repo_owner, repo_name, pr['number'])
+
+
+class PullRequestList(object):
+    def __init__(self):
+        self.prs = []
+
+    def find_prs_for_ref(self, repo_owner, repo_name, remote_ref_name):
+        """Get all pull request for repo, and filter based on remote_ref_name"""
+
+        # need repo_owner and repo_name to ask for the pull requests
+        # TODO: cli arg to check closed pr's as well
+        url = "https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name)
+        prs = get_url(url, auth=get_auth())
+
+
+        for pr in prs:
+            # find the pull request that has match ref name
+            if pr['head']['ref'] == u'%s' % remote_ref_name:
+                # for the case of a specific pr, we could maybe
+                # figure out the file_to_diff locally, but asking
+                # the api for it means we dont need to be i a repo
+                file_to_diff = compare_commits(repo_owner, repo_name,
+                                               pr['base']['sha'],
+                                               pr['head']['sha'])
+                self.prs.append(PullRequest(repo_owner, repo_name,
+                                            pr['number'],
+                                            file_to_diff))
+
+    def add_pr_by_number(self, repo_owner, repo_name, pr_number):
+        pr = PullRequest.create_by_number(repo_owner, repo_name, pr_number)
+        file_to_diff = compare_commits(repo_owner, repo_name,
+                                       pr['base']['sha'],
+                                       pr['head']['sha'])
+        pr.diffs = file_to_diff
+        self.prs.append(pr)
+
 
 def gfm(text):
     # Extract pre blocks.
@@ -158,41 +213,14 @@ def get_remote_branch_ref(local_ref):
 def compare_commits(repo_owner, repo_name, base_sha1, head_sha1):
     url = "https://api.github.com/repos/%s/%s/compare/%s...%s" % \
             (repo_owner, repo_name, base_sha1, head_sha1)
-    results = get_url_dict(url, auth=get_auth())
-    #pp(results)
+    results = get_url(url, auth=get_auth())
     file_to_diff = {}
     for file_data in results['files']:
         if file_data['filename'] in file_to_diff:
             print "ugh, wtf"
         file_to_diff[file_data['filename']] = file_data['patch']
-        #if file_data['filename'] != "src/main/java/org/candlepin/model/RulesCurator.java":
-        #   continue
-        #print "filename: %s" % file_data['filename']
-        #print "patch len:", len(file_data['patch'].splitlines())
-        #print
 
     return file_to_diff
-
-def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
-    """Get all pull request for repo, and filter based on remote_ref_name"""
-
-    # need repo_owner and repo_name to ask for the pull requests
-    # TODO: cli arg to check closed pr's as well
-    url = "https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name)
-    prs = get_url_dict(url, auth=get_auth())
-
-    #print prs, prs.status
-    #pp(prs)
-    pull_request_info = []
-    for pr in prs:
-        # find the pull request that has match ref name
-        if pr['head']['ref'] == u'%s' % remote_ref_name:
-            file_to_diff = compare_commits(repo_owner, repo_name,
-                                           pr['base']['sha'],
-                                           pr['head']['sha'])
-            pull_request_info.append((repo_owner, repo_name,
-                                      pr['number'], file_to_diff))
-    return pull_request_info
 
 import pprint
 pp = pprint.pprint
@@ -202,7 +230,7 @@ pp = pprint.pprint
 # new file the comment corresponds to. Involves a little
 # of parsing a diff (reading the hunk header, and keeping
 # track of insertions and deletions)
-def find_comment_line(comment, file_to_diff):
+def find_comment_line(comment, pull_request):
     """returns line of latest version of file that comment applies to.
 
     Returns an int linenumber if the comment applies, None
@@ -215,7 +243,7 @@ def find_comment_line(comment, file_to_diff):
         # outdated diff
         return None
 
-    diff_hunk = file_to_diff[comment['path']]
+    diff_hunk = pull_request.diffs[comment['path']]
     diff_hunk_lines = diff_hunk.splitlines()
     # The position index is against the full diff, not just the hunk
     # but we want to compute final line. new approach...
@@ -248,39 +276,28 @@ def get_url(url, auth):
     if DEBUG:
         sys.stderr.write("%s:%s\n" % (url, r.status_code))
     if 'next' in r.links:
-        next_comments = get_url(r.links['next']['url'], auth=auth)
-        appended = r.json() + next_comments
-        return appended
-    return r.json()
-
-# support github api pagination
-def get_url_dict(url, auth):
-    r = requests.get(url, auth=auth)
-    if DEBUG:
-        sys.stderr.write("%s:%s\n" % (url, r.status_code))
-    if 'next' in r.links:
-        #print "next link: ", r.links['next']['url']
         next_data = get_url(r.links['next']['url'], auth=auth)
-        appended = r.json().update(next_data)
-        return appended
+        data = r.json()
+        if isinstance(data, types.DictType):
+            return data.update(next_data)
+        if isinstance(data, types.ListType):
+            return data + next_data
     return r.json()
 
 
-
-def get_pull_request_comments(pull_request_info):
-    repo_owner, repo_name, pull_request_number, file_to_diff = pull_request_info
+def get_pull_request_comments(pull_request):
+    #repo_owner, repo_name, pull_request_number, file_to_diff = pull_request
     url = "https://api.github.com/repos/%s/%s/pulls/%s/comments" % \
-        (repo_owner, repo_name, pull_request_number)
-
+            (pull_request.repo_owner,
+             pull_request.repo_name,
+             pull_request.pr_number)
     # I was hoping this would render the markdown to text, but that
     # does not appear to be the case.
     #headers = {'Accept': 'application/vnd.github.v3.text+json',
     #           'User-Agent': 'git-comments via python requests'}
 
     r_comments = get_url(url, auth=get_auth())
-    show_pull_request_comments(r_comments, repo_owner,
-                               repo_name, pull_request_number,
-                               file_to_diff)
+    return r_comments
 
 
 def format_comment_body(comment):
@@ -293,8 +310,7 @@ def format_comment_body(comment):
     return body_text
 
 
-def show_pull_request_comments(comments, repo_owner, repo_name,
-                               pull_request_number, file_to_diff):
+def show_pull_request_comments(comments, pull_request):
     # unified diff chunk header
     # lets sort the comments by path
     # we probably want to eventually subsort on computed line offset,
@@ -305,7 +321,7 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
     # sort by file path
     comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
-        comment_line = find_comment_line(comment, file_to_diff)
+        comment_line = find_comment_line(comment, pull_request)
         if comment_line is None:
             # no comment applies
             continue
@@ -321,14 +337,27 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
         # there. hopefully just counting newlines and +/-'s can get us close
         # enough
         print "%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
-                                     comment['user']['login'], pull_request_number,
+                                     comment['user']['login'], pull_request.pr_number,
                                      body_text)
 
 #FIXME, turn on basic auth just to not get rate limited so
 # much for testing. Need to add oauth support
-def get_auth():
+# also,
+#def get_auth():
+def read_user_cfg():
+    global cfg
     cfg = ConfigParser.ConfigParser()
-    cfg.read(os.path.expanduser("~/.github-comments"))
+    cfg_file = os.path.expanduser("~/.github-comments")
+    if not os.access(cfg_file, os.R_OK):
+        return None
+    cfg.read(cfg_file)
+    return cfg
+
+def get_auth():
+    global cfg
+    if cfg is None:
+        print "no user cfg, using basic auth"
+        return None
     user = cfg.get("main", "username")
     password = cfg.get("main", "password")
     return user, password
@@ -337,7 +366,10 @@ def get_auth():
 def main():
     repo_name = None
     repo_owner = None
-    pull_request_infos = []
+
+    read_user_cfg()
+
+    pull_requests = PullRequestList()
 
     # clearly not the most rebust arg handling yet
     if len(sys.argv) > 1:
@@ -345,8 +377,9 @@ def main():
             repo_owner = sys.argv[1]
             repo_name = sys.argv[2]
             pull_request_number = sys.argv[3]
-            pull_request_infos.append((repo_owner, repo_name,
-                                       pull_request_number))
+            pull_requests.add_by_number(repo_owner,
+                                        repo_name,
+                                        pull_request_number)
         except Exception:
             print "usage: github-comments repo_name pr_number"
             raise
@@ -370,8 +403,8 @@ def main():
             # does it make sense to support multiple per requests per
             # branch? Suppose you can push a branch to a fork, and then
             # make multiple pull requests to different upstreams?
-            pull_request_infos += find_pr_for_ref(repo_owner, repo_name,
-                                                  remote_ref_name)
+            pull_requests.find_prs_for_ref(repo_owner, repo_name,
+                                           remote_ref_name)
 
     # see list of pull commits, including info about the ref of the branch
     # it was created for.
@@ -379,13 +412,13 @@ def main():
 
     # set errorformat='%f:%l:%m,%E%f:%l:%m,%-Z%^%$
 
-    if not pull_request_infos:
-        print "no open pull requests found"
+    if not pull_requests.prs:
+        sys.stderr.write("no open pull requests found\n")
         sys.exit()
 
-    for pull_request_info in pull_request_infos:
-        get_pull_request_comments(pull_request_info)
-
+    for pull_request in pull_requests.prs:
+        pr_comments = get_pull_request_comments(pull_request)
+        show_pull_request_comments(pr_comments, pull_request)
 
 if __name__ == "__main__":
     main()
