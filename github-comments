@@ -28,7 +28,9 @@
 
 from hashlib import md5
 # we could ditch the git subprocess probably
+import ConfigParser
 import operator
+import os
 import re
 import subprocess
 import sys
@@ -154,32 +156,40 @@ def get_remote_branch_ref(local_ref):
 def compare_commits(repo_owner, repo_name, base_sha1, head_sha1):
     url = "https://api.github.com/repos/%s/%s/compare/%s...%s" % \
             (repo_owner, repo_name, base_sha1, head_sha1)
-    results = get_url(url)
+    results = get_url_dict(url, auth=get_auth())
+    #pp(results)
+    file_to_diff = {}
     for file_data in results['files']:
-        if file_data['filename'] != "src/main/java/org/candlepin/resource/RulesResource.java":
-            continue
-        print "filename: %s" % file_data['filename']
-        print "patch:"
-        print file_data['patch']
-        print
+        if file_data['filename'] in file_to_diff:
+            print "ugh, wtf"
+        file_to_diff[file_data['filename']] = file_data['patch']
+        #if file_data['filename'] != "src/main/java/org/candlepin/model/RulesCurator.java":
+        #   continue
+        #print "filename: %s" % file_data['filename']
+        #print "patch len:", len(file_data['patch'].splitlines())
+        #print
 
+    return file_to_diff
 
 def find_pr_for_ref(repo_owner, repo_name, remote_ref_name):
     """Get all pull request for repo, and filter based on remote_ref_name"""
 
     # need repo_owner and repo_name to ask for the pull requests
     # TODO: cli arg to check closed pr's as well
-    r = requests.get("https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name))
-    prs = r.json()
+    url = "https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name)
+    prs = get_url_dict(url, auth=get_auth())
 
+    #print prs, prs.status
+    #pp(prs)
     pull_request_info = []
     for pr in prs:
         # find the pull request that has match ref name
         if pr['head']['ref'] == u'%s' % remote_ref_name:
-            pull_request_info.append((repo_owner, repo_name, pr['number']))
-            compare_commits(repo_owner, repo_name,
-                            pr['base']['sha'],
-                            pr['head']['sha'])
+            file_to_diff = compare_commits(repo_owner, repo_name,
+                                           pr['base']['sha'],
+                                           pr['head']['sha'])
+            pull_request_info.append((repo_owner, repo_name,
+                                      pr['number'], file_to_diff))
     return pull_request_info
 
 import pprint
@@ -190,7 +200,7 @@ pp = pprint.pprint
 # new file the comment corresponds to. Involves a little
 # of parsing a diff (reading the hunk header, and keeping
 # track of insertions and deletions)
-def find_comment_line(comment):
+def find_comment_line(comment, file_to_diff):
     """returns line of latest version of file that comment applies to.
 
     Returns an int linenumber if the comment applies, None
@@ -202,74 +212,88 @@ def find_comment_line(comment):
     else:
         # outdated diff
         return None
-#    vc = ['src/main/java/org/candlepin/resource/RulesResource.java',
-#            'src/main/java/org/candlepin/policy/js/pool/PoolRules.java']
-#        if comment['path'] in vc:
-#            pp(comment)
 
-    diff_hunk = comment['diff_hunk']
+    diff_hunk = file_to_diff[comment['path']]
     diff_hunk_lines = diff_hunk.splitlines()
-    diff_hunk_header = diff_hunk_lines[0]
-    matches = diff_hunk_pattern.match(diff_hunk_header)
-    if matches:
-        groups = matches.groups()
-        new_start = groups[2]
-        new_size = groups[3]
-        #print "op", op, "p",  p, "new_start", new_start, "new_size", new_size
+        # The position index is against the full diff, not just the hunk
+    # but we want to compute final line. new approach...
+    # - go to 'position' offset, then count backwards till we hit
+    # a chunk header, then parse the header line to find this chunks
+    # "new_start" line. Then comment_line = new_start + distance_from_p_to_header
 
-    # trying to figure out which line the comment should be associated
-    # with. for simple diffs, it seems ok, but for more complicated diffs
-    # with multiple chunks, it seems like we are missing infomation. The
-    # comment json has 'position' and 'original_position', which are
-    # basically the line numbers of the diff that the comment is for. But,
-    # the comment's 'diff_hunk' is only part of the diff. So if the
-    # preceding hunk doesn't have a comment, we can't count correctly
-    # because we dont know it's size. It seems like the position info
-    # in the comment data isn't particular useful for these cases.
-    # maybe the api for particular comments is better? It would be
-    # nice not to have to get each comment, or even each commit diff
-    # at a time though.
     count = 0
-    comment_line = int(new_start)
-    for line in diff_hunk_lines[1:]:
-        if line[0] == '-':
-            pass
-            #continue
-            #comment_line -= 1
-        elif line[0] == '+':
-            comment_line += 1
-        else:
-            comment_line += 1
-
-        if count >= p:
-            break
-#       if p == op:
-#           if count == p:
-#               print "[p op %s] " % comment_line,
-#       else:
-#           if count == op:
-#               print "[op %s] " % comment_line,
-#           if count == p:
-#               print "[p %s] " % comment_line,
-#       print "%s %s: %s" % (count, comment_line, line)
-#       if count == p or count == op:
-#           print " -=| \" %s \" |=-" % body_text
-        count += 1
+    for line in reversed(diff_hunk_lines[:p]):
+        # we found a header line
+        if line[:2] == "@@":
+            matches = diff_hunk_pattern.match(line)
+            if matches:
+                groups = matches.groups()
+                new_start = groups[2]
+                new_size = groups[3]
+                break
+            else:
+                continue
+        # dont count '-' lines
+        if line[0] in ['+', ' ']:
+            count += 1
+    comment_line = int(new_start) + count
     return comment_line
+
+#    count = 0
+    #comment_line = int(new_start)
+    #for line in diff_hunk_lines[1:]:
+        #if line[0] == '-':
+            #pass
+            ##continue
+##            comment_line -= 1
+        #elif line[0] == '+':
+            #comment_line += 1
+        #else:
+            #comment_line += 1
+
+        #if count >= p:
+            #break
+##        if p == op:
+##            if count == p:
+##               print "[p op %s] " % comment_line,
+##        else:
+##            if count == op:
+##                print "[op %s] " % comment_line,
+##            if count == p:
+##                print "[p %s] " % comment_line,
+##        print "%s %s: %s" % (count, comment_line, line)
+##        if count == p or count == op:
+##            print " -=| \" %s \" |=-" % comment['body']
+        #count += 1
+    ##print "cl: %s" % comment_line
+    #return comment_line
 
 
 # support github api pagination
-def get_url(url):
-    r = requests.get(url)
+def get_url(url, auth):
+    r = requests.get(url, auth=auth)
+    sys.stderr.write("%s:%s\n" % (url, r.status_code))
     if 'next' in r.links:
-        next_comments = get_url(r.links['next']['url'])
+        next_comments = get_url(r.links['next']['url'], auth=auth)
         appended = r.json() + next_comments
         return appended
     return r.json()
 
+# support github api pagination
+def get_url_dict(url, auth):
+    r = requests.get(url, auth=auth)
+    sys.stderr.write("%s:%s\n" % (url, r.status_code))
+    if 'next' in r.links:
+        #print "next link: ", r.links['next']['url']
+        next_data = get_url(r.links['next']['url'], auth=auth)
+        appended = r.json().update(next_data)
+        return appended
+    return r.json()
+
+
 
 def get_pull_request_comments(pull_request_info):
-    repo_owner, repo_name, pull_request_number = pull_request_info
+    repo_owner, repo_name, pull_request_number, file_to_diff = pull_request_info
     url = "https://api.github.com/repos/%s/%s/pulls/%s/comments" % \
         (repo_owner, repo_name, pull_request_number)
 
@@ -278,10 +302,11 @@ def get_pull_request_comments(pull_request_info):
     #headers = {'Accept': 'application/vnd.github.v3.text+json',
     #           'User-Agent': 'git-comments via python requests'}
 
-    r_comments = get_url(url)
+    r_comments = get_url(url, auth=get_auth())
 #    print "# comments: %s" % len(r_comments)
     show_pull_request_comments(r_comments, repo_owner,
-                               repo_name, pull_request_number)
+                               repo_name, pull_request_number,
+                               file_to_diff)
 
 
 def format_comment_body(comment):
@@ -291,11 +316,12 @@ def format_comment_body(comment):
     body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
 
     body_text = "\n".join(body_text_lines)
-    return body_text
+    return ''
+#    return body_text
 
 
 def show_pull_request_comments(comments, repo_owner, repo_name,
-                               pull_request_number):
+                               pull_request_number, file_to_diff):
 #    print "# comments: %s" % len(comments)
     # unified diff chunk header
     # lets sort the comments by path
@@ -308,7 +334,7 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
     comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
     #    pp(comment)
-        comment_line = find_comment_line(comment)
+        comment_line = find_comment_line(comment, file_to_diff)
         if comment_line is None:
             # no comment applies
             continue
@@ -327,6 +353,13 @@ def show_pull_request_comments(comments, repo_owner, repo_name,
                                      comment['user']['login'], pull_request_number,
                                      body_text)
 
+#FIXME
+def get_auth():
+    cfg = ConfigParser.ConfigParser()
+    cfg.read(os.path.expanduser("~/.github-comments"))
+    user = cfg.get("main", "username")
+    password = cfg.get("main", "password")
+    return user, password
 
 def main():
     repo_name = None
@@ -364,7 +397,8 @@ def main():
             # does it make sense to support multiple per requests per
             # branch? Suppose you can push a branch to a fork, and then
             # make multiple pull requests to different upstreams?
-            pull_request_infos += find_pr_for_ref(repo_owner, repo_name, remote_ref_name)
+            pull_request_infos += find_pr_for_ref(repo_owner, repo_name,
+                                                  remote_ref_name)
 
     # see list of pull commits, including info about the ref of the branch
     # it was created for.
