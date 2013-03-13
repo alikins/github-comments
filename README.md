@@ -10,7 +10,7 @@ Usage
 ====
 
 ```
-github-comments repouser reponame pull_request_number
+github-comments repo_user repo_name pull_request_number
 ```
 
 or, if you are on a branch that has had pull requested
@@ -39,17 +39,11 @@ The fields are:
 - the pull request number
 - the body of the comment, text'ified and possibly multiline
 
-Deps
-====
-
-- requests http://python-requests.org/
-- markdown https://pypi.python.org/pypi/Markdown
-
 Automatic Mode
 =============
 
 If no args are specified, it tries to guess
-which pull request to use. 
+which pull request to use.
 
 To get automatic mode to work, you need:
 
@@ -57,18 +51,72 @@ To get automatic mode to work, you need:
 - The merge url needs to be a github repo
 - The repo needs to have open pull requests against it
 
+
+Instalation
+============
+Make sure the deps mentioned in Deps are installed,
+and copy github-comments into your path.
+
+
+Command line options
+===================
+```
+Usage: github-comments [options] [repo_owner] [repo_name] [pull_request_number]
+
+Options:
+  -h, --help            show this help message and exit
+  -r, --review-comments
+  --no-review-comments
+  -c, --pr-comments
+```
+
+For example,
+```
+    github-comments alikins github-comments 3
+```
+
+Will show the review comments for pull request number 3
+of the github-comments repo.
+
+Adding the --pr-comments will also include the non
+patch specific comments made on the pull request.
+
 Using with Vim
 ==============
 
 github-comments can be used as a "makeprg" file to
-generate a list of errors/warnings to investigate. 
+generate a list of errors/warnings to investigate.
 
-in vim, set makeprg to github-comments
+In vim, set makeprg to github-comments
 ```
     :set makeprg=github-comments
 ```
 
 Invoking ':make' or similar will use the output
-as an errorlist. 
+as an errorlist. ':copen' etc to view files
+with comments, etc.
+
+
+Authentication
+==============
+
+Currently, only authenticated access (the default), and
+basic authentication is supported.
+
+To enable http Basic Auth for a user, add a ~/.github-comments
+config file. File format is ini file style (ala, ConfigParser),
+for example:
+
+```
+[main]
+username = username
+password = password
+```
+
+Deps
+====
+
+- requests http://python-requests.org/
+- markdown https://pypi.python.org/pypi/Markdown
 
 
