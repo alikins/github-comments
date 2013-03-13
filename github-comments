@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/bin/python
 
 # show github pull request comments in a lint like format
 #
@@ -349,6 +349,7 @@ def show_pull_request_review_comments(comments, pull_request):
                                      comment['user']['login'], pull_request.pr_number,
                                      body_text)
 
+
 def show_pull_request_comments(comments, pull_request):
     for comment in comments:
         body_text = format_comment_body(comment)
@@ -357,17 +358,20 @@ def show_pull_request_comments(comments, pull_request):
                                   pull_request.pr_number,
                                   body_text)
 
+
 #FIXME, turn on basic auth just to not get rate limited so
 # much for testing. Need to add oauth support
 # also,
 def read_user_cfg():
     global cfg
-    cfg = ConfigParser.ConfigParser()
+
     cfg_file = os.path.expanduser("~/.github-comments")
     if not os.access(cfg_file, os.R_OK):
         return None
+    cfg = ConfigParser.ConfigParser()
     cfg.read(cfg_file)
     return cfg
+
 
 def get_auth():
     global cfg
