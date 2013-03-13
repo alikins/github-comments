@@ -29,6 +29,7 @@
 from hashlib import md5
 # we could ditch the git subprocess probably
 import ConfigParser
+import optparse
 import operator
 import os
 import re
@@ -285,7 +286,7 @@ def get_url(url, auth):
     return r.json()
 
 
-def get_pull_request_comments(pull_request):
+def get_pull_request_review_comments(pull_request):
     #repo_owner, repo_name, pull_request_number, file_to_diff = pull_request
     url = "https://api.github.com/repos/%s/%s/pulls/%s/comments" % \
             (pull_request.repo_owner,
@@ -299,6 +300,21 @@ def get_pull_request_comments(pull_request):
     r_comments = get_url(url, auth=get_auth())
     return r_comments
 
+def get_pull_request_comments(pull_request):
+    url = "https://api.github.com/repos/%s/%s/issues/%s/comments"  % \
+            (pull_request.repo_owner,
+             pull_request.repo_name,
+             pull_request.pr_number)
+    # I was hoping this would render the markdown to text, but that
+    # does not appear to be the case.
+    #headers = {'Accept': 'application/vnd.github.v3.text+json',
+    #           'User-Agent': 'git-comments via python requests'}
+
+    r_comments = get_url(url, auth=get_auth())
+    return r_comments
+
+    return {}
+
 
 def format_comment_body(comment):
     body_text_gfm = comment['body']
@@ -310,7 +326,7 @@ def format_comment_body(comment):
     return body_text
 
 
-def show_pull_request_comments(comments, pull_request):
+def show_pull_request_review_comments(comments, pull_request):
     # unified diff chunk header
     # lets sort the comments by path
     # we probably want to eventually subsort on computed line offset,
@@ -319,6 +335,7 @@ def show_pull_request_comments(comments, pull_request):
     # the order based on the computed stuff, then walk over them
     # again and display
     # sort by file path
+
     comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
         comment_line = find_comment_line(comment, pull_request)
@@ -328,22 +345,21 @@ def show_pull_request_comments(comments, pull_request):
 
         body_text = format_comment_body(comment)
         # this is less broken now
-        # FIXME: this is broken. The position/original_postion in the review
-        # comment json is not the position in the patched file, but just the
-        # position in the diff hunk itself.
-        #
-        # We should be able to parse the diff enough to get the starting offset
-        # of the diff, and figure out the right offset for the comment from
-        # there. hopefully just counting newlines and +/-'s can get us close
-        # enough
         print "%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
                                      comment['user']['login'], pull_request.pr_number,
                                      body_text)
 
+def show_pull_request_comments(comments, pull_request):
+    for comment in comments:
+        body_text = format_comment_body(comment)
+        print "%s:%s:pr%s: %s" % (pull_request.repo_name,
+                                  comment['user']['login'],
+                                  pull_request.pr_number,
+                                  body_text)
+
 #FIXME, turn on basic auth just to not get rate limited so
 # much for testing. Need to add oauth support
 # also,
-#def get_auth():
 def read_user_cfg():
     global cfg
     cfg = ConfigParser.ConfigParser()
@@ -371,18 +387,25 @@ def main():
 
     pull_requests = PullRequestList()
 
+    parser = optparse.OptionParser()
+    parser.add_option("-r", "--review-comments", dest="pr_review_comments",
+                    action="store_true", default=True)
+    parser.add_option("--no-review-comments", dest="pr_review_comments",
+                      action="store_false")
+    parser.add_option("-c", "--pr-comments", dest="pr_comments",
+                    action="store_true", default=False)
+    options, args = parser.parse_args()
     # clearly not the most rebust arg handling yet
-    if len(sys.argv) > 1:
+    if len(args) > 1:
         try:
-            repo_owner = sys.argv[1]
-            repo_name = sys.argv[2]
-            pull_request_number = sys.argv[3]
+            repo_owner = args[0]
+            repo_name = args[1]
+            pull_request_number = args[2]
             pull_requests.add_pr_by_number(repo_owner,
                                            repo_name,
                                            pull_request_number)
         except Exception:
             print "usage: github-comments repo_name pr_number"
-            raise
     else:
         # well then, let's guess!
 
@@ -417,8 +440,11 @@ def main():
         sys.exit()
 
     for pull_request in pull_requests.prs:
-        pr_comments = get_pull_request_comments(pull_request)
-        show_pull_request_comments(pr_comments, pull_request)
-
+        if options.pr_comments:
+            pr_comments = get_pull_request_comments(pull_request)
+            show_pull_request_comments(pr_comments, pull_request)
+        if options.pr_review_comments:
+            pr_review_comments = get_pull_request_review_comments(pull_request)
+            show_pull_request_review_comments(pr_review_comments, pull_request)
 if __name__ == "__main__":
     main()
