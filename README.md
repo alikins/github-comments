@@ -100,7 +100,7 @@ with comments, etc.
 Authentication
 ==============
 
-Currently, only authenticated access (the default), and
+Currently, only unauthenticated access (the default), and
 basic authentication is supported.
 
 To enable http Basic Auth for a user, add a ~/.github-comments
