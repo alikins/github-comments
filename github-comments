@@ -59,6 +59,86 @@ diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 DEBUG = False
 cfg = None
 
+class GitHubAuth(object):
+    def __init__(self):
+        pass
+
+class GitHubBasicAuth(GitHubAuth):
+    def __init__(self, username, password):
+        self.username = username
+        self.password = password
+
+    def info(self):
+        return self.username, self.password
+
+# support github api pagination
+class GitHubApi(object):
+    def __init__(self, host, auth):
+        self.host = host
+        self.debug = False
+        self.auth = auth
+        # auth stuff, etc
+
+
+    def get_url(self, url=None, full_url=None):
+        url = full_url or "https://%s/%s" (self.host, url)
+        r = requests.get(url, auth=self.auth.info())
+        if self.debug:
+            sys.stderr.write("%s:%s\n" % (url, r.status_code))
+        if 'next' in r.links:
+            next_data = self.get_url(r.links['next']['url'], auth=auth)
+            data = r.json()
+            if isinstance(data, types.DictType):
+                return data.update(next_data)
+            if isinstance(data, types.ListType):
+                return data + next_data
+        return r.json()
+
+    def get_pull_request_review_comments(self, pull_request):
+        url = "repos/%s/%s/pulls/%s/comments" % \
+            (pull_request.repo_owner,
+             pull_request.repo_name,
+             pull_request.pr_number)
+        # I was hoping this would render the markdown to text, but that
+        # does not appear to be the case.
+        #headers = {'Accept': 'application/vnd.github.v3.text+json',
+        #           'User-Agent': 'git-comments via python requests'}
+
+        r_comments = self.get_url(url)
+        return r_comments
+
+    def get_pull_request_comments(self, pull_request):
+        url = "repos/%s/%s/issues/%s/comments" % \
+            (pull_request.repo_owner,
+             pull_request.repo_name,
+             pull_request.pr_number)
+        # I was hoping this would render the markdown to text, but that
+        # does not appear to be the case.
+        #headers = {'Accept': 'application/vnd.github.v3.text+json',
+        #           'User-Agent': 'git-comments via python requests'}
+
+        r_comments = self.get_url(url)
+        return r_comments
+
+    def get_compare_commits(self, repo_owner, repo_name, base_sha1, head_sha1):
+        url = "repos/%s/%s/compare/%s...%s" % \
+            (repo_owner, repo_name, base_sha1, head_sha1)
+        results = self.get_url(url)
+        return results
+
+    def get_pull_requests(self, repo_owner, repo_name):
+        url = "repos/%s/%s/pulls?open" % (repo_owner, repo_name)
+        prs = self.get_url.get_url(url)
+
+        return prs
+
+    def get_pull_request(self, repo_owner, repo_name, pr_number):
+        url = "repos/%s/%s/pulls/%s" % (repo_owner,
+                                        repo_name,
+                                        pr_number)
+        prs = self.get_url(url)
+        return prs
+
 
 class PullRequest(object):
     def __init__(self, repo_owner, repo_name,
@@ -70,46 +150,53 @@ class PullRequest(object):
         self.data = data
 
     @classmethod
-    def create_by_number(cls, repo_owner, repo_name, pr_number):
-        url = "https://api.github.com/repos/%s/%s/pulls/%s" % (repo_owner,
-                                                              repo_name,
-                                                              pr_number)
-        pr = get_url(url, auth=get_auth())
+    def create_by_number(cls, github_api, repo_owner, repo_name, pr_number):
+        pr = github_api.get_pull_request(repo_owner, repo_name, pr_number)
         return cls(repo_owner, repo_name, pr['number'], data=pr)
 
 
 class PullRequestList(object):
-    def __init__(self):
+    def __init__(self, github_api):
+        self.github_api = github_api
         self.prs = []
 
     def find_prs_for_ref(self, repo_owner, repo_name, remote_ref_name):
         """Get all pull request for repo, and filter based on remote_ref_name"""
-
+        prs = self.github_api.get_pull_requests(repo_owner, repo_name)
         # need repo_owner and repo_name to ask for the pull requests
         # TODO: cli arg to check closed pr's as well
-        url = "https://api.github.com/repos/%s/%s/pulls?open" % (repo_owner, repo_name)
-        prs = get_url(url, auth=get_auth())
-
         for pr in prs:
             # find the pull request that has match ref name
             if pr['head']['ref'] == u'%s' % remote_ref_name:
                 # for the case of a specific pr, we could maybe
                 # figure out the file_to_diff locally, but asking
                 # the api for it means we dont need to be i a repo
-                file_to_diff = compare_commits(repo_owner, repo_name,
-                                               pr['base']['sha'],
-                                               pr['head']['sha'])
+                file_to_diff = self.get_compare_commits(repo_owner, repo_name,
+                                                        pr['base']['sha'],
+                                                        pr['head']['sha'])
                 self.prs.append(PullRequest(repo_owner, repo_name,
                                             pr['number'],
                                             file_to_diff))
 
     def add_pr_by_number(self, repo_owner, repo_name, pr_number):
-        pr = PullRequest.create_by_number(repo_owner, repo_name, pr_number)
-        file_to_diff = compare_commits(repo_owner, repo_name,
-                                       pr.data['base']['sha'],
-                                       pr.data['head']['sha'])
+        pr = PullRequest.create_by_number(self.github_api, repo_owner,
+                                          repo_name, pr_number)
+        file_to_diff = self.get_file_to_diff(repo_owner, repo_name,
+                                             pr.data['base']['sha'],
+                                             pr.data['head']['sha'])
         pr.diffs = file_to_diff
         self.prs.append(pr)
+
+    def get_file_to_diff(self, repo_owner, repo_name, base_sha, head_sha):
+        results = self.github_api.get_compare_commits(repo_owner, repo_name,
+                                                      base_sha, head_sha)
+        file_to_diff = {}
+        for file_data in results['files']:
+            if file_data['filename'] in file_to_diff:
+                print "ugh, wtf"
+            file_to_diff[file_data['filename']] = file_data['patch']
+
+        return file_to_diff
 
 
 def gfm(text):
@@ -153,7 +240,8 @@ def gfm(text):
 # sometimes I just dont want to use them
 def find_github_repos():
     """Find remotes that are github, and find the repo name"""
-    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'], stdout=subprocess.PIPE)
+    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'],
+                               stdout=subprocess.PIPE)
     git_config = process.communicate()[0]
     config_lines = git_config.splitlines()
     github_repos = set()
@@ -190,7 +278,8 @@ def get_branch_ref():
     # we could just read and parse .git/HEAD
     # needs to follow through to get upstream branch name
     # see "remote-ref" alias in my gitconfig for example
-    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'], stdout=subprocess.PIPE)
+    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                               stdout=subprocess.PIPE)
     this_branch = process.communicate()[0]
     return this_branch.strip()
 
@@ -211,17 +300,6 @@ def get_remote_branch_ref(local_ref):
     remote_ref = remote_merge_ref_full[len('refs/heads/'):]
     return remote_ref.strip()
 
-def compare_commits(repo_owner, repo_name, base_sha1, head_sha1):
-    url = "https://api.github.com/repos/%s/%s/compare/%s...%s" % \
-            (repo_owner, repo_name, base_sha1, head_sha1)
-    results = get_url(url, auth=get_auth())
-    file_to_diff = {}
-    for file_data in results['files']:
-        if file_data['filename'] in file_to_diff:
-            print "ugh, wtf"
-        file_to_diff[file_data['filename']] = file_data['patch']
-
-    return file_to_diff
 
 import pprint
 pp = pprint.pprint
@@ -237,7 +315,7 @@ def find_comment_line(comment, pull_request):
     Returns an int linenumber if the comment applies, None
     otherwise
     """
-    op = int(comment['original_position'])
+    #op = int(comment['original_position'])
     if comment['position']:
         p = int(comment['position'])
     else:
@@ -260,7 +338,6 @@ def find_comment_line(comment, pull_request):
             if matches:
                 groups = matches.groups()
                 new_start = groups[2]
-                new_size = groups[3]
                 break
             else:
                 continue
@@ -269,51 +346,6 @@ def find_comment_line(comment, pull_request):
             count += 1
     comment_line = int(new_start) + count
     return comment_line
-
-
-# support github api pagination
-def get_url(url, auth):
-    r = requests.get(url, auth=auth)
-    if DEBUG:
-        sys.stderr.write("%s:%s\n" % (url, r.status_code))
-    if 'next' in r.links:
-        next_data = get_url(r.links['next']['url'], auth=auth)
-        data = r.json()
-        if isinstance(data, types.DictType):
-            return data.update(next_data)
-        if isinstance(data, types.ListType):
-            return data + next_data
-    return r.json()
-
-
-def get_pull_request_review_comments(pull_request):
-    #repo_owner, repo_name, pull_request_number, file_to_diff = pull_request
-    url = "https://api.github.com/repos/%s/%s/pulls/%s/comments" % \
-            (pull_request.repo_owner,
-             pull_request.repo_name,
-             pull_request.pr_number)
-    # I was hoping this would render the markdown to text, but that
-    # does not appear to be the case.
-    #headers = {'Accept': 'application/vnd.github.v3.text+json',
-    #           'User-Agent': 'git-comments via python requests'}
-
-    r_comments = get_url(url, auth=get_auth())
-    return r_comments
-
-def get_pull_request_comments(pull_request):
-    url = "https://api.github.com/repos/%s/%s/issues/%s/comments"  % \
-            (pull_request.repo_owner,
-             pull_request.repo_name,
-             pull_request.pr_number)
-    # I was hoping this would render the markdown to text, but that
-    # does not appear to be the case.
-    #headers = {'Accept': 'application/vnd.github.v3.text+json',
-    #           'User-Agent': 'git-comments via python requests'}
-
-    r_comments = get_url(url, auth=get_auth())
-    return r_comments
-
-    return {}
 
 
 def format_comment_body(comment):
@@ -346,8 +378,10 @@ def show_pull_request_review_comments(comments, pull_request):
         body_text = format_comment_body(comment)
         # this is less broken now
         print "%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
-                                     comment['user']['login'], pull_request.pr_number,
+                                     comment['user']['login'],
+                                     pull_request.pr_number,
                                      body_text)
+
 
 def show_pull_request_comments(comments, pull_request):
     for comment in comments:
@@ -356,6 +390,7 @@ def show_pull_request_comments(comments, pull_request):
                                   comment['user']['login'],
                                   pull_request.pr_number,
                                   body_text)
+
 
 #FIXME, turn on basic auth just to not get rate limited so
 # much for testing. Need to add oauth support
@@ -368,6 +403,7 @@ def read_user_cfg():
         return None
     cfg.read(cfg_file)
     return cfg
+
 
 def get_auth():
     global cfg
@@ -385,7 +421,12 @@ def main():
 
     read_user_cfg()
 
-    pull_requests = PullRequestList()
+    # hook up oauth, etc
+    username, password = get_auth()
+    github_auth = GitHubBasicAuth(username, password)
+
+    github_api = GitHubApi("api.github.com", github_auth)
+    pull_requests = PullRequestList(github_api)
 
     parser = optparse.OptionParser()
     parser.add_option("-r", "--review-comments", dest="pr_review_comments",
@@ -441,10 +482,10 @@ def main():
 
     for pull_request in pull_requests.prs:
         if options.pr_comments:
-            pr_comments = get_pull_request_comments(pull_request)
+            pr_comments = github_api.get_pull_request_comments(pull_request)
             show_pull_request_comments(pr_comments, pull_request)
         if options.pr_review_comments:
-            pr_review_comments = get_pull_request_review_comments(pull_request)
+            pr_review_comments = github_api.get_pull_request_review_comments(pull_request)
             show_pull_request_review_comments(pr_review_comments, pull_request)
 if __name__ == "__main__":
     main()
