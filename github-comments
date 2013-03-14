@@ -28,6 +28,7 @@
 
 from hashlib import md5
 # we could ditch the git subprocess probably
+import codecs
 import ConfigParser
 import optparse
 import operator
@@ -61,6 +62,9 @@ DEBUG = False
 cfg = None
 
 pp = pprint.pprint
+
+sys.stdout = codecs.getwriter('utf8')(sys.stdout)
+sys.stderr = codecs.getwriter('utf8')(sys.stderr)
 
 
 class GitHubAuth(object):
@@ -309,6 +313,7 @@ def get_remote_branch_ref(local_ref):
     remote_ref = remote_merge_ref_full[len('refs/heads/'):]
     return remote_ref.strip()
 
+
 # given comment object, figure out which lines of the
 # new file the comment corresponds to. Involves a little
 # of parsing a diff (reading the hunk header, and keeping
@@ -359,7 +364,7 @@ def format_comment_body(comment):
     body_text_html = markdown.markdown(body_text_md)
     body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
 
-    body_text = "\n".join(body_text_lines)
+    body_text = u"\n".join(body_text_lines)
     return body_text
 
 
@@ -382,7 +387,7 @@ def show_pull_request_review_comments(comments, pull_request):
 
         body_text = format_comment_body(comment)
         # this is less broken now
-        print "%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
+        print u"%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
                                      comment['user']['login'],
                                      pull_request.pr_number,
                                      body_text)
@@ -391,7 +396,7 @@ def show_pull_request_review_comments(comments, pull_request):
 def show_pull_request_comments(comments, pull_request):
     for comment in comments:
         body_text = format_comment_body(comment)
-        print "%s:%s:pr%s: %s" % (pull_request.repo_name,
+        print u"%s:%s:pr%s: %s" % (pull_request.repo_name,
                                   comment['user']['login'],
                                   pull_request.pr_number,
                                   body_text)
