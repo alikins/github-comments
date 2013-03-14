@@ -59,9 +59,11 @@ diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 DEBUG = False
 cfg = None
 
+
 class GitHubAuth(object):
     def __init__(self):
         pass
+
 
 class GitHubBasicAuth(GitHubAuth):
     def __init__(self, username, password):
@@ -69,24 +71,25 @@ class GitHubBasicAuth(GitHubAuth):
         self.password = password
 
     def info(self):
-        return self.username, self.password
+        return (self.username, self.password)
+
 
 # support github api pagination
 class GitHubApi(object):
-    def __init__(self, host, auth):
+    def __init__(self, host, auth, debug=False):
         self.host = host
-        self.debug = False
+        self.debug = debug
         self.auth = auth
         # auth stuff, etc
 
-
     def get_url(self, url=None, full_url=None):
-        url = full_url or "https://%s/%s" (self.host, url)
+        url = full_url or "https://%s/%s" % (self.host, url)
         r = requests.get(url, auth=self.auth.info())
         if self.debug:
             sys.stderr.write("%s:%s\n" % (url, r.status_code))
+            sys.stderr.write("%s\n" % pp(r.headers))
         if 'next' in r.links:
-            next_data = self.get_url(r.links['next']['url'], auth=auth)
+            next_data = self.get_url(full_url=r.links['next']['url'])
             data = r.json()
             if isinstance(data, types.DictType):
                 return data.update(next_data)
@@ -128,7 +131,7 @@ class GitHubApi(object):
 
     def get_pull_requests(self, repo_owner, repo_name):
         url = "repos/%s/%s/pulls?open" % (repo_owner, repo_name)
-        prs = self.get_url.get_url(url)
+        prs = self.get_url(url)
 
         return prs
 
@@ -328,7 +331,8 @@ def find_comment_line(comment, pull_request):
     # but we want to compute final line. new approach...
     # - go to 'position' offset, then count backwards till we hit
     # a chunk header, then parse the header line to find this chunks
-    # "new_start" line. Then comment_line = new_start + distance_from_p_to_header
+    # "new_start" line. Then comment_line = new_start +
+    # distance_from_p_to_header
 
     count = 0
     for line in reversed(diff_hunk_lines[:p]):
@@ -420,23 +424,27 @@ def main():
     repo_name = None
     repo_owner = None
 
+    parser = optparse.OptionParser()
+    parser.add_option("-r", "--review-comments", dest="pr_review_comments",
+                      action="store_true", default=True)
+    parser.add_option("--no-review-comments", dest="pr_review_comments",
+                      action="store_false")
+    parser.add_option("-c", "--pr-comments", dest="pr_comments",
+                      action="store_true", default=False)
+    parser.add_option("-d", "--debug", dest="debug",
+                      action="store_true", default=False)
+    options, args = parser.parse_args()
+
     read_user_cfg()
 
     # hook up oauth, etc
     username, password = get_auth()
     github_auth = GitHubBasicAuth(username, password)
 
-    github_api = GitHubApi("api.github.com", github_auth)
+    github_api = GitHubApi("api.github.com", github_auth,
+                           debug=options.debug)
     pull_requests = PullRequestList(github_api)
 
-    parser = optparse.OptionParser()
-    parser.add_option("-r", "--review-comments", dest="pr_review_comments",
-                    action="store_true", default=True)
-    parser.add_option("--no-review-comments", dest="pr_review_comments",
-                      action="store_false")
-    parser.add_option("-c", "--pr-comments", dest="pr_comments",
-                    action="store_true", default=False)
-    options, args = parser.parse_args()
     # clearly not the most rebust arg handling yet
     if len(args) > 1:
         try:
