@@ -36,6 +36,7 @@ import re
 import subprocess
 import sys
 import types
+import pprint
 
 # for parsing html into plain txt
 from BeautifulSoup import BeautifulSoup
@@ -58,6 +59,8 @@ diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 
 DEBUG = False
 cfg = None
+
+pp = pprint.pprint
 
 
 class GitHubAuth(object):
@@ -86,11 +89,14 @@ class GitHubApi(object):
         url = full_url or "https://%s/%s" % (self.host, url)
         r = requests.get(url, auth=self.auth.info())
         if self.debug:
+            # move to using a logger
             sys.stderr.write("%s:%s\n" % (url, r.status_code))
             sys.stderr.write("%s\n" % pp(r.headers))
         if 'next' in r.links:
             next_data = self.get_url(full_url=r.links['next']['url'])
             data = r.json()
+            if self.debug:
+                sys.stderr.write("%s\n" % pp(data))
             if isinstance(data, types.DictType):
                 return data.update(next_data)
             if isinstance(data, types.ListType):
@@ -174,9 +180,9 @@ class PullRequestList(object):
                 # for the case of a specific pr, we could maybe
                 # figure out the file_to_diff locally, but asking
                 # the api for it means we dont need to be i a repo
-                file_to_diff = self.get_compare_commits(repo_owner, repo_name,
-                                                        pr['base']['sha'],
-                                                        pr['head']['sha'])
+                file_to_diff = self.get_file_to_diff(repo_owner, repo_name,
+                                                     pr['base']['sha'],
+                                                     pr['head']['sha'])
                 self.prs.append(PullRequest(repo_owner, repo_name,
                                             pr['number'],
                                             file_to_diff))
@@ -302,11 +308,6 @@ def get_remote_branch_ref(local_ref):
     # needs to skip remote name here as well
     remote_ref = remote_merge_ref_full[len('refs/heads/'):]
     return remote_ref.strip()
-
-
-import pprint
-pp = pprint.pprint
-
 
 # given comment object, figure out which lines of the
 # new file the comment corresponds to. Involves a little
