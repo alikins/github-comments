@@ -39,6 +39,10 @@ The fields are:
 - the pull request number
 - the body of the comment, text'ified and possibly multiline
 
+If the ```--pr-comments``` flag will include comments
+made on the pull request itself, that will use the
+repo_name as the "filename", and an empty line number.
+
 Automatic Mode
 =============
 
@@ -52,7 +56,7 @@ To get automatic mode to work, you need:
 - The repo needs to have open pull requests against it
 
 
-Instalation
+Installation
 ============
 Make sure the deps mentioned in Deps are installed,
 and copy github-comments into your path.
@@ -68,6 +72,7 @@ Options:
   -r, --review-comments
   --no-review-comments
   -c, --pr-comments
+  -d, --debug
 ```
 
 For example,
