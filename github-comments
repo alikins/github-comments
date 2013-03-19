@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/local/bin/python
 
 # show github pull request comments in a lint like format
 #
@@ -71,14 +71,34 @@ class GitHubAuth(object):
     def __init__(self):
         pass
 
+    def add_to_session(self, requests_session):
+        requests_session.auth = None
+
+class GitHubNoAuth(GitHubAuth):
+    """unauthenticated access"""
+
 
 class GitHubBasicAuth(GitHubAuth):
+    """http basic auth (user/pass)"""
     def __init__(self, username, password):
         self.username = username
         self.password = password
 
     def info(self):
         return (self.username, self.password)
+
+    def add_to_session(self, requests_session):
+        requests_session.auth = self.info()
+
+
+class GitHubOauth2Auth(GitHubAuth):
+    "Oauth2 based github auth"""
+    def __init__(self, token):
+        self.token = token
+        # use basic auth to get token
+
+    def add_to_session(self, requests_session):
+        request_session.headers.update({"Authorization": "token %s" % self.token})
 
 
 # support github api pagination
@@ -88,10 +108,17 @@ class GitHubApi(object):
         self.debug = debug
         self.auth = auth
         # auth stuff, etc
+        self.session = requests.Session()
+
+        # attach auth info
+        self.auth.add_to_session(self.session)
 
     def get_url(self, url=None, full_url=None):
+
         url = full_url or "https://%s/%s" % (self.host, url)
-        r = requests.get(url, auth=self.auth.info())
+        r = self.session.get(url)
+        print "auth", self.auth
+#        print "session auth", self.session.auth
         if self.debug:
             # move to using a logger
             sys.stderr.write("%s:%s\n" % (url, r.status_code))
@@ -419,11 +446,12 @@ def read_user_cfg():
 def get_auth():
     global cfg
     if cfg is None:
-        print "no user cfg, using basic auth"
-        return None
+        print "no user cfg, using no auth"
+        return GitHubNoAuth()
     user = cfg.get("main", "username")
     password = cfg.get("main", "password")
-    return user, password
+    return GitHubBasicAuth(user, password)
+
 
 
 def main():
@@ -444,8 +472,8 @@ def main():
     read_user_cfg()
 
     # hook up oauth, etc
-    username, password = get_auth()
-    github_auth = GitHubBasicAuth(username, password)
+    github_auth = get_auth()
+    #github_auth = GitHubBasicAuth(username, password)
 
     github_api = GitHubApi("api.github.com", github_auth,
                            debug=options.debug)
