@@ -38,6 +38,7 @@ import subprocess
 import sys
 import types
 import pprint
+import json
 
 # for parsing html into plain txt
 from BeautifulSoup import BeautifulSoup
@@ -98,8 +99,7 @@ class GitHubOauth2Auth(GitHubAuth):
         # use basic auth to get token
 
     def add_to_session(self, requests_session):
-        request_session.headers.update({"Authorization": "token %s" % self.token})
-
+        requests_session.headers.update({"Authorization": "token %s" % self.token})
 
 # support github api pagination
 class GitHubApi(object):
@@ -110,19 +110,33 @@ class GitHubApi(object):
         # auth stuff, etc
         self.session = requests.Session()
 
+        self.add_auth_to_session()
+
+    def add_auth_to_session(self):
         # attach auth info
+        # new session with new auth
+        self.session = requests.Session()
         self.auth.add_to_session(self.session)
+
+    def post_url(self, url=None, full_url=None, data=None):
+        url = full_url or "https://%s/%s" % (self.host, url)
+        r = self.session.post(url, data=json.dumps(data))
+        print r.headers
+        return r.json()
+
+    def post_authorizations(self, data=None):
+        url = "authorizations"
+        r_authorizations = self.post_url(url=url, data=data)
+        return r_authorizations
 
     def get_url(self, url=None, full_url=None):
 
         url = full_url or "https://%s/%s" % (self.host, url)
         r = self.session.get(url)
-        print "auth", self.auth
 #        print "session auth", self.session.auth
         if self.debug:
             # move to using a logger
-            sys.stderr.write("%s:%s\n" % (url, r.status_code))
-            sys.stderr.write("%s\n" % pp(r.headers))
+            sys.stderr.write("auth: %s\n" % self.auth)
         if 'next' in r.links:
             next_data = self.get_url(full_url=r.links['next']['url'])
             data = r.json()
@@ -479,6 +493,17 @@ def main():
                            debug=options.debug)
     pull_requests = PullRequestList(github_api)
 
+    data={'scopes': ['public_repo'],
+          'note': 'github-comments'}
+
+    print "authorizations"
+    oauth_info = github_api.post_authorizations(data=data)
+    oauth_token = oauth_info['token']
+
+    github_auth_oauth = GitHubOauth2Auth(oauth_token)
+    github_api.auth = github_auth_oauth
+    github_api.add_auth_to_session()
+
     # clearly not the most rebust arg handling yet
     if len(args) > 1:
         try:
@@ -489,7 +514,8 @@ def main():
                                            repo_name,
                                            pull_request_number)
         except Exception:
-            print "usage: github-comments repo_name pr_number"
+            print "usage: github-comments repo_owner repo_name pr_number"
+            raise
     else:
         # well then, let's guess!
 
