@@ -101,6 +101,18 @@ Invoking ':make' or similar will use the output
 as an errorlist. ':copen' etc to view files
 with comments, etc.
 
+output from 'github-comments' is parseable
+as a vim error file as well. So, to
+open vim with an error list based on
+the comments and jump to the first entry:
+
+```
+    vim -q <(github-comments)
+```
+
+This executes 'github-comments' and uses
+process substitution to create a errorfile
+for vim to read.
 
 Authentication
 ==============
