@@ -30,15 +30,16 @@ from hashlib import md5
 # we could ditch the git subprocess probably
 import codecs
 import ConfigParser
+import getpass
+import json
 import optparse
 import operator
 import os
+import pprint
 import re
 import subprocess
 import sys
 import types
-import pprint
-import json
 
 # for parsing html into plain txt
 from BeautifulSoup import BeautifulSoup
@@ -60,7 +61,6 @@ import requests
 diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
 
 DEBUG = False
-cfg = None
 
 pp = pprint.pprint
 
@@ -465,30 +465,44 @@ def show_pull_request_comments(comments, pull_request):
                                    body_text)
 
 
-#FIXME, turn on basic auth just to not get rate limited so
-# much for testing. Need to add oauth support
-# also,
-def read_user_cfg():
-    global cfg
+class GitHubCommentsConfig(object):
+    def __init__(self, filename=None):
+        self.filename = filename or os.path.expanduser("~/.github-comments")
+        self.data = ConfigParser.SafeConfigParser()
 
-    cfg_file = os.path.expanduser("~/.github-comments")
-    if not os.access(cfg_file, os.R_OK):
-        return None
-    cfg = ConfigParser.ConfigParser()
-    cfg.read(cfg_file)
-    return cfg
+    def read(self):
+        # no config file to read
+        if os.access(self.filename, os.R_OK):
+            self.data.read([self.filename])
+        else:
+            # empty config
+            self.data.add_section("main")
+
+    def save(self):
+        self.data.write(open(self.filename, 'w'))
 
 
-def get_auth():
-    global cfg
-    if cfg is None:
-        print "no user cfg, using no auth"
-        return GitHubNoAuth()
-    user = cfg.get("main", "username")
-    password = cfg.get("main", "password")
-    if cfg.has_option("main", "oauth_token"):
-        return GitHubOauth2Auth(cfg.get("main", "oauth_token"))
-    return GitHubBasicAuth(user, password)
+# cli password reader for auth setup
+def get_username_password():
+    username = None
+    password = None
+    username = raw_input("username: ")
+    password = getpass.getpass("password: ")
+    return (username, password)
+
+
+def get_auth(cfg):
+    # prefer oauth
+    if cfg.data.has_option("main", "oauth_token"):
+        return GitHubOauth2Auth(cfg.data.get("main", "oauth_token"))
+
+    if cfg.data.has_option("main", "username") and cfg.data.has_option("main", "password"):
+        user = cfg.data.get("main", "username")
+        password = cfg.data.get("main", "password")
+        return GitHubBasicAuth(user, password)
+
+    # no auth specified
+    return GitHubNoAuth()
 
 
 def main():
@@ -504,13 +518,28 @@ def main():
                       action="store_true", default=False)
     parser.add_option("-d", "--debug", dest="debug",
                       action="store_true", default=False)
+    parser.add_option("-a", "--authenticate", dest="store_auth",
+                      action="store_true", default=False)
+
     options, args = parser.parse_args()
 
-    read_user_cfg()
+    cfg = GitHubCommentsConfig()
+    cfg.read()
 
-    # hook up oauth, etc
-    github_auth = get_auth()
-    #github_auth = GitHubBasicAuth(username, password)
+    if options.store_auth:
+        # connect basic, get oauth token, save it in cfg,
+        # and reload config
+        username, password = get_username_password()
+        github_api = GitHubApi("api.github.com",
+                               GitHubBasicAuth(username, password))
+        github_api.update_auth()
+        oauth_token = github_api.auth.token
+        cfg.data.set("main", "oauth_token", oauth_token)
+        cfg.save()
+        cfg = GitHubCommentsConfig()
+        cfg.read()
+
+    github_auth = get_auth(cfg)
 
     github_api = GitHubApi("api.github.com", github_auth,
                            debug=options.debug)

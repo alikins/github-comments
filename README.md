@@ -73,6 +73,7 @@ Options:
   --no-review-comments
   -c, --pr-comments
   -d, --debug
+  -a, --authenticate
 ```
 
 For example,
@@ -117,8 +118,18 @@ for vim to read.
 Authentication
 ==============
 
-Currently, only unauthenticated access (the default), and
-basic authentication is supported.
+No authentication, basic auth, and oauth2
+are supported.
+
+Default authentication is no authentication.
+
+Since this is read only, that works fine for public
+repos. But it is rate limited.
+
+To create and store a OAUTH token, run with -a/--authentication.
+This will prompt for a github username and password, and
+create a OAUTH token for that user and this utility and save
+it into ~/.github-comments.
 
 To enable http Basic Auth for a user, add a ~/.github-comments
 config file. File format is ini file style (ala, ConfigParser),
@@ -129,6 +140,24 @@ for example:
 username = username
 password = password
 ```
+
+If basic auth is available, github-comments will
+request an oauth token for the github-comments
+app, with a "public_repo" scope[1], and will
+use the OAUTH2 token for the rest of the
+connections.
+
+A permanent oauth token can be specified
+in the config file with the 'oauth_token'
+field (or with the -a/--authenticate option):
+
+```
+[main]
+oauth_token = 123123123123123123
+```
+
+
+[1] http://developer.github.com/v3/oauth/#scopes
 
 Deps
 ====
