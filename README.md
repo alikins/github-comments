@@ -115,6 +115,15 @@ This executes 'github-comments' and uses
 process substitution to create a errorfile
 for vim to read.
 
+Another approach:
+
+```
+    vim -c ':set makeprg=github-comments' -c ':make'
+```
+
+Run vim, setting makeprg and populating quickfixlist
+with github-comments.
+
 Authentication
 ==============
 
