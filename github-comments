@@ -32,6 +32,7 @@ import codecs
 import ConfigParser
 import getpass
 import json
+import logging
 import optparse
 import operator
 import os
@@ -49,6 +50,8 @@ import markdown
 # if we stick to a single file util concept
 import requests
 
+log = logging.getLogger("github-comments")
+logging.basicConfig()
 # from from https://gist.github.com/gasman/856894
 # git hub api comment content types stuff doesnt work
 # bundle here for lower deps, since it seems that
@@ -58,7 +61,9 @@ import requests
 #
 
 # regex for parsing a diff hunk header and finding the offsets and sizes
-diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
+#   @@ -[old_pos],[new_pos],
+#diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@")
+diff_hunk_pattern = re.compile("^@@ -(\\d+),(\\d+) \\+(\\d+).* @@")
 
 DEBUG = False
 
@@ -155,19 +160,22 @@ class GitHubApi(object):
     def get_url(self, url=None, full_url=None):
 
         url = full_url or "https://%s/%s" % (self.host, url)
+        log.debug("get_url url: %s" % url)
         r = self.session.get(url)
         if self.debug:
             # move to using a logger
-            sys.stderr.write("auth: %s\n" % self.auth)
+            log.debug("auth: %s" % self.auth)
         if 'next' in r.links:
             next_data = self.get_url(full_url=r.links['next']['url'])
             data = r.json()
             if self.debug:
-                sys.stderr.write("%s\n" % pp(data))
+                log.debug("get_url data:%s" % pp(data))
             if isinstance(data, types.DictType):
                 return data.update(next_data)
             if isinstance(data, types.ListType):
                 return data + next_data
+        if self.debug:
+            log.info("get url return status: %s" % r.status_code)
         return r.json()
 
     def get_pull_request_review_comments(self, pull_request):
@@ -405,6 +413,7 @@ def find_comment_line(comment, pull_request):
         p = int(comment['position'])
     else:
         # outdated diff
+        log.debug("no comment position found for %s" % comment)
         return None
 
     diff_hunk = pull_request.diffs[comment['path']]
@@ -416,6 +425,7 @@ def find_comment_line(comment, pull_request):
     # "new_start" line. Then comment_line = new_start +
     # distance_from_p_to_header
 
+    log.debug("diff_hunk_lines: %s" % diff_hunk_lines)
     count = 0
     new_start = None
     for line in reversed(diff_hunk_lines[:p]):
@@ -427,6 +437,7 @@ def find_comment_line(comment, pull_request):
                 new_start = groups[2]
                 break
             else:
+                log.debug("no diff hunk pattern matches: %s" % matches)
                 continue
         # dont count '-' lines
         if line[0] in ['+', ' ']:
@@ -460,6 +471,7 @@ def show_pull_request_review_comments(comments, pull_request):
     comments.sort(key=operator.itemgetter('path'))
     for comment in comments:
         comment_line = find_comment_line(comment, pull_request)
+        log.debug("comment line: %s" % comment_line)
         if comment_line is None:
             # no comment applies
             continue
@@ -558,6 +570,9 @@ def main():
         cfg = GitHubCommentsConfig()
         cfg.read()
 
+    if options.debug:
+        log.setLevel(logging.DEBUG)
+
     github_auth = get_auth(cfg)
 
     github_api = GitHubApi("api.github.com", github_auth,
@@ -628,6 +643,9 @@ def main():
                                                           lineno,
                                                           comment)
         print pr_comment
+
+    if options.debug:
+        log.info("pull_requests: %s" % pull_requests.prs)
 
     for pull_request in pull_requests.prs:
         if options.pr_comments:
