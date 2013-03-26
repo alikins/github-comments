@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # show github pull request comments in a lint like format
 #
@@ -195,6 +195,19 @@ class GitHubApi(object):
 
         r_comments = self.get_url(url)
         return r_comments
+
+    def post_pull_request_comment(self, pull_request, comment, commit_id, path, position):
+        url = "repos/%s/%s/pulls/%s/comments" % \
+            (pull_request.repo_owner,
+             pull_request.repo_name,
+             pull_request.pr_number)
+
+        data = {'body': comment,
+                'commit_id': commit_id,
+                'path': path,
+                'position': position}
+        r_comment = self.post_url(url, data=data)
+        return r_comment
 
     def get_compare_commits(self, repo_owner, repo_name, base_sha1, head_sha1):
         url = "repos/%s/%s/compare/%s...%s" % \
@@ -404,6 +417,7 @@ def find_comment_line(comment, pull_request):
     # distance_from_p_to_header
 
     count = 0
+    new_start = None
     for line in reversed(diff_hunk_lines[:p]):
         # we found a header line
         if line[:2] == "@@":
@@ -417,6 +431,8 @@ def find_comment_line(comment, pull_request):
         # dont count '-' lines
         if line[0] in ['+', ' ']:
             count += 1
+    if new_start is None:
+        return None
     comment_line = int(new_start) + count
     return comment_line
 
@@ -520,7 +536,10 @@ def main():
                       action="store_true", default=False)
     parser.add_option("-a", "--authenticate", dest="store_auth",
                       action="store_true", default=False)
-
+    # maybe posting comments is getting a touch out of scope...
+    # and posting comments should probably be a sub command...
+    parser.add_option("-C", "--comment", dest="post_comment",
+                        action="store_true", default=False)
     options, args = parser.parse_args()
 
     cfg = GitHubCommentsConfig()
@@ -547,7 +566,9 @@ def main():
     pull_requests = PullRequestList(github_api)
 
     # clearly not the most rebust arg handling yet
-    if len(args) > 1:
+
+    # fix me, make post comment a sub command
+    if len(args) > 1 and not options.pr_comment:
         try:
             repo_owner = args[0]
             repo_name = args[1]
@@ -590,6 +611,23 @@ def main():
     if not pull_requests.prs:
         sys.stderr.write("no open pull requests found\n")
         sys.exit()
+
+    if options.post_comment:
+        # assume rest of args are path, lineno, comment
+        # assume we want to comment on latest version
+        # also assume we only found one pull request here
+        # and that we are using "automatic" mode and we populated
+        # the pull request from the api, so commit id is in
+        # pull_request.data['head']['sha']
+        pull_request = pull_requests.prs[0]
+        path = args[0]
+        lineno = args[1]
+        comment = args[2]
+        pr_comment = github_api.post_pull_request_comment(pull_request,
+                                                          path,
+                                                          lineno,
+                                                          comment)
+        print pr_comment
 
     for pull_request in pull_requests.prs:
         if options.pr_comments:
