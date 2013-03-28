@@ -58,9 +58,9 @@ To get automatic mode to work, you need:
 
 Installation
 ============
-Make sure the deps mentioned in Deps are installed,
-and copy github-comments into your path.
-
+```
+python setup.py install
+```
 
 Command line options
 ===================
