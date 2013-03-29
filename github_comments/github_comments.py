@@ -31,6 +31,7 @@ import codecs
 import ConfigParser
 import getpass
 import json
+import logging
 import operator
 import os
 import pprint
@@ -49,6 +50,9 @@ import requests
 import gfm
 import github_auth
 import git_util
+
+log = logging.getLogger("github-comments")
+logging.basicConfig()
 
 # git hub api comment content types stuff doesnt work
 # bundle here for lower deps, since it seems that
@@ -357,9 +361,9 @@ def main():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("owner", action="store", nargs='*')
-    parser.add_argument("repo", action="store", nargs='*')
-    parser.add_argument("pr", action="store", nargs='*')
+    parser.add_argument("owner", action="store", nargs='?', default=None)
+    parser.add_argument("repo", action="store", nargs='?', default=None)
+    parser.add_argument("pr", action="store", nargs='?', default=None)
 
     parser.add_argument("-r", "--review-comments", dest="pr_review_comments",
                         action="store_true", default=True)
@@ -373,6 +377,9 @@ def main():
                         action="store_true", default=False)
 
     args = parser.parse_args()
+    if args.debug:
+        log.setLevel(logging.DEBUG)
+        log.debug("args: %s\n" % args)
 
     cfg = GitHubCommentsConfig()
     cfg.read()
@@ -400,9 +407,9 @@ def main():
     # clearly not the most rebust arg handling yet
     if args.owner and args.repo and args.pr:
         try:
-            repo_owner = args[0]
-            repo_name = args[1]
-            pull_request_number = args[2]
+            repo_owner = args.owner
+            repo_name = args.repo
+            pull_request_number = args.pr
             pull_requests.add_pr_by_number(repo_owner,
                                            repo_name,
                                            pull_request_number)
