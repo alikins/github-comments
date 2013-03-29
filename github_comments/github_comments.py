@@ -26,8 +26,6 @@
 #     no tracking branch. Should be able to find it by tracking donw
 #     the right sha's though
 
-from hashlib import md5
-# we could ditch the git subprocess probably
 import codecs
 import ConfigParser
 import getpass
@@ -37,7 +35,6 @@ import operator
 import os
 import pprint
 import re
-import subprocess
 import sys
 import types
 
@@ -49,7 +46,10 @@ import markdown
 # if we stick to a single file util concept
 import requests
 
-# from from https://gist.github.com/gasman/856894
+import gfm
+import github_auth
+import git_util
+
 # git hub api comment content types stuff doesnt work
 # bundle here for lower deps, since it seems that
 #
@@ -64,52 +64,14 @@ DEBUG = False
 
 pp = pprint.pprint
 
+# let sys.stdout/err handle UTF-8 since it
+# will default to 'ascii' for pipes
 sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 sys.stderr = codecs.getwriter('utf8')(sys.stderr)
 
 
-class GitHubAuth(object):
-    def __init__(self):
-        pass
-
-    def add_to_session(self, requests_session):
-        requests_session.auth = None
-
-
-class GitHubNoAuth(GitHubAuth):
-    auth_type = "no_auth"
-    """unauthenticated access"""
-
-
-class GitHubBasicAuth(GitHubAuth):
-    """http basic auth (user/pass)"""
-    auth_type = "basic"
-
-    def __init__(self, username, password):
-        self.username = username
-        self.password = password
-
-    def info(self):
-        return (self.username, self.password)
-
-    def add_to_session(self, requests_session):
-        requests_session.auth = self.info()
-
-
-class GitHubOauth2Auth(GitHubAuth):
-    "Oauth2 based github auth"""
-    auth_type = "oauth2"
-
-    def __init__(self, token):
-        self.token = token
-        # use basic auth to get token
-
-    def add_to_session(self, requests_session):
-        requests_session.headers.update({"Authorization": "token %s" % self.token})
-
-
 # support github api pagination
-class GitHubApi(object):
+class GithubApi(object):
     def __init__(self, host, auth, debug=False):
         self.host = host
         self.debug = debug
@@ -139,7 +101,7 @@ class GitHubApi(object):
         oauth_info = self.post_authorizations(data=data)
         oauth_token = oauth_info['token']
 
-        self.auth = GitHubOauth2Auth(oauth_token)
+        self.auth = github_auth.GithubOauth2Auth(oauth_token)
         self.add_auth_to_session()
 
     def post_url(self, url=None, full_url=None, data=None):
@@ -275,108 +237,6 @@ class PullRequestList(object):
         return file_to_diff
 
 
-def gfm(text):
-    # Extract pre blocks.
-    extractions = {}
-
-    def pre_extraction_callback(matchobj):
-        digest = md5(matchobj.group(0)).hexdigest()
-        extractions[digest] = matchobj.group(0)
-        return "{gfm-extraction-%s}" % digest
-    pattern = re.compile(r'<pre>.*?</pre>', re.MULTILINE | re.DOTALL)
-    text = re.sub(pattern, pre_extraction_callback, text)
-
-    # Prevent foo_bar_baz from ending up with an italic word in the middle.
-    def italic_callback(matchobj):
-        s = matchobj.group(0)
-        if list(s).count('_') >= 2:
-            return s.replace('_', '\_')
-        return s
-    pattern = re.compile(r'^(?! {4}|\t)\w+(?<!_)_\w+_\w[\w_]*', re.MULTILINE | re.UNICODE)
-    text = re.sub(pattern, italic_callback, text)
-
-    # In very clear cases, let newlines become <br /> tags.
-    def newline_callback(matchobj):
-        if len(matchobj.group(1)) == 1:
-            return matchobj.group(0).rstrip() + '  \n'
-        else:
-            return matchobj.group(0)
-    pattern = re.compile(r'^[\w\<][^\n]*(\n+)', re.MULTILINE | re.UNICODE)
-    text = re.sub(pattern, newline_callback, text)
-
-    # Insert pre block extractions.
-    def pre_insert_callback(matchobj):
-        return '\n\n' + extractions[matchobj.group(1)]
-    text = re.sub(r'{gfm-extraction-([0-9a-f]{32})\}', pre_insert_callback, text)
-
-    return text
-
-
-# I love regular expressions as much as the next guy, but
-# sometimes I just dont want to use them
-def find_github_repos():
-    """Find remotes that are github, and find the repo name"""
-    process = subprocess.Popen(['/usr/bin/git', 'config', '-l'],
-                               stdout=subprocess.PIPE)
-    git_config = process.communicate()[0]
-    config_lines = git_config.splitlines()
-    github_repos = set()
-    for config_line in config_lines:
-        if not config_line.startswith("remote."):
-            continue
-        key, value = config_line.split('=', 1)
-        if not key.endswith('.url'):
-            continue
-        # verify this is a github repo
-        if 'github.com' not in value:
-            continue
-        repo_url = value
-        if repo_url.startswith("git@"):
-            repo_url_parts = repo_url.rsplit('/', 1)
-            name_dot_git = repo_url_parts[-1]
-            owner_name = repo_url_parts[-2].split(':', 1)[1]
-        elif repo_url.startswith("git://"):
-            repo_url_parts = repo_url.split('/')
-            name_dot_git = repo_url_parts[-1]
-            # can repo's have / in the name?
-            owner_name = repo_url_parts[-2]
-
-        # probably sombody with a foo.git/ reponame
-        if name_dot_git.endswith('.git'):
-            name = name_dot_git[:-4]
-        else:
-            name = name_dot_git
-        github_repos.add((owner_name, name))
-    return github_repos
-
-
-def get_branch_ref():
-    # we could just read and parse .git/HEAD
-    # needs to follow through to get upstream branch name
-    # see "remote-ref" alias in my gitconfig for example
-    process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                               stdout=subprocess.PIPE)
-    this_branch = process.communicate()[0]
-    return this_branch.strip()
-
-
-def get_remote_branch_ref(local_ref):
-    # see if we have an "upstream" or merge ref
-    branch_config_key = "branch.%s.merge" % local_ref
-    process = subprocess.Popen(['/usr/bin/git', 'config', '--get', branch_config_key],
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    remote_merge_ref_full = process.communicate()[0]
-    remote_merge_ref_full.strip()
-
-    if process.returncode > 0:
-        sys.stderr.write("No merge ref found for %s\n (no config set for %s) " %
-                        (local_ref, branch_config_key))
-        return local_ref
-    # needs to skip remote name here as well
-    remote_ref = remote_merge_ref_full[len('refs/heads/'):]
-    return remote_ref.strip()
-
-
 # given comment object, figure out which lines of the
 # new file the comment corresponds to. Involves a little
 # of parsing a diff (reading the hunk header, and keeping
@@ -423,7 +283,7 @@ def find_comment_line(comment, pull_request):
 
 def format_comment_body(comment):
     body_text_gfm = comment['body']
-    body_text_md = gfm(body_text_gfm)
+    body_text_md = gfm.gfm(body_text_gfm)
     body_text_html = markdown.markdown(body_text_md)
     body_text_lines = (BeautifulSoup(body_text_html).findAll(text=True))
 
@@ -491,20 +351,6 @@ def get_username_password():
     return (username, password)
 
 
-def get_auth(cfg):
-    # prefer oauth
-    if cfg.data.has_option("main", "oauth_token"):
-        return GitHubOauth2Auth(cfg.data.get("main", "oauth_token"))
-
-    if cfg.data.has_option("main", "username") and cfg.data.has_option("main", "password"):
-        user = cfg.data.get("main", "username")
-        password = cfg.data.get("main", "password")
-        return GitHubBasicAuth(user, password)
-
-    # no auth specified
-    return GitHubNoAuth()
-
-
 def main():
     repo_name = None
     repo_owner = None
@@ -530,8 +376,8 @@ def main():
         # connect basic, get oauth token, save it in cfg,
         # and reload config
         username, password = get_username_password()
-        github_api = GitHubApi("api.github.com",
-                               GitHubBasicAuth(username, password))
+        github_api = GithubApi("api.github.com",
+                               github_auth.GithubBasicAuth(username, password))
         github_api.update_auth()
         oauth_token = github_api.auth.token
         cfg.data.set("main", "oauth_token", oauth_token)
@@ -539,9 +385,9 @@ def main():
         cfg = GitHubCommentsConfig()
         cfg.read()
 
-    github_auth = get_auth(cfg)
+    gh_auth = github_auth.get_auth(cfg)
 
-    github_api = GitHubApi("api.github.com", github_auth,
+    github_api = GithubApi("api.github.com", gh_auth,
                            debug=options.debug)
 
     pull_requests = PullRequestList(github_api)
@@ -562,15 +408,15 @@ def main():
         # well then, let's guess!
 
         # local branch name
-        local_ref_name = get_branch_ref()
+        local_ref_name = git_util.get_branch_ref()
 
         # look up the merge ref, if we dont have one, skip it.
         # we could probably take some guesss...
-        remote_ref_name = get_remote_branch_ref(local_ref_name)
+        remote_ref_name = git_util.get_remote_branch_ref(local_ref_name)
 
         # lets find all the github repo's this could be a branch of,
         # ignoring multiple remote names for the same repo
-        github_repos = find_github_repos()
+        github_repos = git_util.find_github_repos()
 
         for github_repo in github_repos:
             repo_owner, repo_name = github_repo
@@ -598,5 +444,4 @@ def main():
         if options.pr_review_comments:
             pr_review_comments = github_api.get_pull_request_review_comments(pull_request)
             show_pull_request_review_comments(pr_review_comments, pull_request)
-if __name__ == "__main__":
-    main()
+
