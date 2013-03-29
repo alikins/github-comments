@@ -346,6 +346,10 @@ class GitHubCommentsConfig(object):
         self.data.write(open(self.filename, 'w'))
 
 
+def post_comments():
+    print "foo"
+
+
 # cli password reader for auth setup
 def get_username_password():
     username = None
@@ -355,10 +359,7 @@ def get_username_password():
     return (username, password)
 
 
-def main():
-    repo_name = None
-    repo_owner = None
-
+def parse_args(args_list=None):
     parser = argparse.ArgumentParser()
 
     parser.add_argument("owner", action="store", nargs='?', default=None)
@@ -376,13 +377,30 @@ def main():
     parser.add_argument("-a", "--authenticate", dest="store_auth",
                         action="store_true", default=False)
 
-    args = parser.parse_args()
+#    subparsers = parser.add_subparsers(help='sub commands')
+    # github-comments comment somefile 37 "this is the rest of the comment"
+#    post_comment_parser = subparsers.add_parser('comment')
+#    post_comment_parser.add_argument("filename", action="store", nargs="?", default=None)
+#    post_comment_parser.add_argument("lineno", action="store", nargs="?", default=None)
+#    post_comment_parser.add_argument("body", action="store", nargs="?",
+#                                     default=None)
+#    post_comment_parser.set_defaults(func=post_comments)
+
+    args = parser.parse_args(args_list)
     if args.debug:
         log.setLevel(logging.DEBUG)
         log.debug("args: %s\n" % args)
 
+    return args
+
+def main():
+    repo_name = None
+    repo_owner = None
+
     cfg = GitHubCommentsConfig()
     cfg.read()
+
+    args = parse_args()
 
     if args.store_auth:
         # connect basic, get oauth token, save it in cfg,
