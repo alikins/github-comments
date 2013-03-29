@@ -9,5 +9,6 @@ setup(name="github-comments",
       author="Adrian Likins",
       author_email="adrian@likins.com",
       packages=find_packages(),
+      install_requires=['argparse', 'requests'],
       #scripts=["scripts/github-comments"],)
       entry_points={'console_scripts': ['github-comments = github_comments.github_comments:main']})

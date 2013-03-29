@@ -26,11 +26,11 @@
 #     no tracking branch. Should be able to find it by tracking donw
 #     the right sha's though
 
+import argparse
 import codecs
 import ConfigParser
 import getpass
 import json
-import optparse
 import operator
 import os
 import pprint
@@ -355,24 +355,29 @@ def main():
     repo_name = None
     repo_owner = None
 
-    parser = optparse.OptionParser()
-    parser.add_option("-r", "--review-comments", dest="pr_review_comments",
-                      action="store_true", default=True)
-    parser.add_option("--no-review-comments", dest="pr_review_comments",
-                      action="store_false")
-    parser.add_option("-c", "--pr-comments", dest="pr_comments",
-                      action="store_true", default=False)
-    parser.add_option("-d", "--debug", dest="debug",
-                      action="store_true", default=False)
-    parser.add_option("-a", "--authenticate", dest="store_auth",
-                      action="store_true", default=False)
+    parser = argparse.ArgumentParser()
 
-    options, args = parser.parse_args()
+    parser.add_argument("owner", action="store", nargs='*')
+    parser.add_argument("repo", action="store", nargs='*')
+    parser.add_argument("pr", action="store", nargs='*')
+
+    parser.add_argument("-r", "--review-comments", dest="pr_review_comments",
+                        action="store_true", default=True)
+    parser.add_argument("--no-review-comments", dest="pr_review_comments",
+                        action="store_false")
+    parser.add_argument("-c", "--pr-comments", dest="pr_comments",
+                        action="store_true", default=False)
+    parser.add_argument("-d", "--debug", dest="debug",
+                        action="store_true", default=False)
+    parser.add_argument("-a", "--authenticate", dest="store_auth",
+                        action="store_true", default=False)
+
+    args = parser.parse_args()
 
     cfg = GitHubCommentsConfig()
     cfg.read()
 
-    if options.store_auth:
+    if args.store_auth:
         # connect basic, get oauth token, save it in cfg,
         # and reload config
         username, password = get_username_password()
@@ -388,12 +393,12 @@ def main():
     gh_auth = github_auth.get_auth(cfg)
 
     github_api = GithubApi("api.github.com", gh_auth,
-                           debug=options.debug)
+                           debug=args.debug)
 
     pull_requests = PullRequestList(github_api)
 
     # clearly not the most rebust arg handling yet
-    if len(args) > 1:
+    if args.owner and args.repo and args.pr:
         try:
             repo_owner = args[0]
             repo_name = args[1]
@@ -438,10 +443,9 @@ def main():
         sys.exit()
 
     for pull_request in pull_requests.prs:
-        if options.pr_comments:
+        if args.pr_comments:
             pr_comments = github_api.get_pull_request_comments(pull_request)
             show_pull_request_comments(pr_comments, pull_request)
-        if options.pr_review_comments:
+        if args.pr_review_comments:
             pr_review_comments = github_api.get_pull_request_review_comments(pull_request)
             show_pull_request_review_comments(pr_review_comments, pull_request)
-
