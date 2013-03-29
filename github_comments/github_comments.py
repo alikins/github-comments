@@ -194,6 +194,7 @@ class PullRequest(object):
     @classmethod
     def create_by_number(cls, github_api, repo_owner, repo_name, pr_number):
         pr = github_api.get_pull_request(repo_owner, repo_name, pr_number)
+        print "pr", pr
         return cls(repo_owner, repo_name, pr['number'], data=pr)
 
 
@@ -346,52 +347,77 @@ class GitHubCommentsConfig(object):
         self.data.write(open(self.filename, 'w'))
 
 
-def post_comments():
-    print "foo"
+def post_comment_args(args):
+    print "post_comments_args", args
+
+
+def pull_request_args(args):
+    print "pull_request_args", args
 
 
 # cli password reader for auth setup
-def get_username_password():
+def get_username():
     username = None
-    password = None
     username = raw_input("username: ")
+    return username
+
+
+def get_password():
+    password = None
     password = getpass.getpass("password: ")
-    return (username, password)
+    return password
 
 
 def parse_args(args_list=None):
-    parser = argparse.ArgumentParser()
+    # set a default command before
 
-    parser.add_argument("owner", action="store", nargs='?', default=None)
-    parser.add_argument("repo", action="store", nargs='?', default=None)
-    parser.add_argument("pr", action="store", nargs='?', default=None)
+    global_parser = argparse.ArgumentParser(add_help=False)
 
-    parser.add_argument("-r", "--review-comments", dest="pr_review_comments",
-                        action="store_true", default=True)
-    parser.add_argument("--no-review-comments", dest="pr_review_comments",
-                        action="store_false")
-    parser.add_argument("-c", "--pr-comments", dest="pr_comments",
-                        action="store_true", default=False)
-    parser.add_argument("-d", "--debug", dest="debug",
-                        action="store_true", default=False)
-    parser.add_argument("-a", "--authenticate", dest="store_auth",
-                        action="store_true", default=False)
+    global_parser.add_argument("-r", "--review-comments", dest="pr_review_comments",
+                               action="store_true", default=True)
+    global_parser.add_argument("--no-review-comments", dest="pr_review_comments",
+                               action="store_false")
+    global_parser.add_argument("-c", "--pr-comments", dest="pr_comments",
+                               action="store_true")
+    global_parser.add_argument("-d", "--debug", dest="debug",
+                               action="store_true")
 
-#    subparsers = parser.add_subparsers(help='sub commands')
+    global_args, unknown_args = global_parser.parse_known_args(args_list)
+
+    if len(unknown_args) == 0:
+        unknown_args.insert(1, "automode")
+
+    parser = argparse.ArgumentParser(parents=[global_parser])
+    subparsers = parser.add_subparsers(help='sub commands', dest="subparser_name")
+
     # github-comments comment somefile 37 "this is the rest of the comment"
-#    post_comment_parser = subparsers.add_parser('comment')
-#    post_comment_parser.add_argument("filename", action="store", nargs="?", default=None)
-#    post_comment_parser.add_argument("lineno", action="store", nargs="?", default=None)
-#    post_comment_parser.add_argument("body", action="store", nargs="?",
-#                                     default=None)
-#    post_comment_parser.set_defaults(func=post_comments)
+    post_comment_parser = subparsers.add_parser('comment')
+    post_comment_parser.add_argument("comment_filename", action="store", nargs="?", default=None)
+    post_comment_parser.add_argument("comment_lineno", action="store", nargs="?", default=None)
+    post_comment_parser.add_argument("comment_body", action="store", nargs="?", default=None)
+    #    post_comment_parser.set_defaults(func=post_comment_args)
 
-    args = parser.parse_args(args_list)
+    pr_parser = subparsers.add_parser('pr')
+    pr_parser.add_argument("pr_owner", action="store", nargs='?', default=None)
+    pr_parser.add_argument("pr_repo", action="store", nargs='?', default=None)
+    pr_parser.add_argument("pr_number", action="store", nargs='?', default=None)
+
+    auth_parser = subparsers.add_parser('auth')
+    auth_parser.add_argument("--username", dest="auth_username",
+                             action="store", nargs="?", default=None)
+    auth_parser.add_argument("--password", dest="auth_password",
+                             action="store", nargs="?", default=None)
+
+    subparsers.add_parser('automode', add_help=False)
+
+    # ugh, no default subcommand
+    args = parser.parse_args(unknown_args)
     if args.debug:
         log.setLevel(logging.DEBUG)
         log.debug("args: %s\n" % args)
 
     return args
+
 
 def main():
     repo_name = None
@@ -400,12 +426,21 @@ def main():
     cfg = GitHubCommentsConfig()
     cfg.read()
 
-    args = parse_args()
+    args = parse_args(sys.argv[1:])
 
-    if args.store_auth:
+    if args.subparser_name == 'auth':
         # connect basic, get oauth token, save it in cfg,
         # and reload config
-        username, password = get_username_password()
+        if args.auth_username:
+            username = args.auth_username
+        else:
+            username = get_username()
+
+        if args.auth_password:
+            password = args.auth_password
+        else:
+            password = get_password()
+
         github_api = GithubApi("api.github.com",
                                github_auth.GithubBasicAuth(username, password))
         github_api.update_auth()
@@ -421,20 +456,20 @@ def main():
                            debug=args.debug)
 
     pull_requests = PullRequestList(github_api)
-
     # clearly not the most rebust arg handling yet
-    if args.owner and args.repo and args.pr:
+    if args.subparser_name == 'pr':
         try:
-            repo_owner = args.owner
-            repo_name = args.repo
-            pull_request_number = args.pr
+            repo_owner = args.pr_owner
+            repo_name = args.pr_repo
+            pull_request_number = args.pr_number
             pull_requests.add_pr_by_number(repo_owner,
                                            repo_name,
                                            pull_request_number)
         except Exception:
             print "usage: github-comments repo_owner repo_name pr_number"
             raise
-    else:
+
+    if args.subparser_name == 'automode':
         # well then, let's guess!
 
         # local branch name
@@ -457,6 +492,11 @@ def main():
             pull_requests.find_prs_for_ref(repo_owner, repo_name,
                                            remote_ref_name)
 
+    if args.subparser_name == 'comment':
+        print "look, I'm adding a comment! %s %s %s" % (args.comment_filename,
+                                                        args.comment_lineno,
+                                                        args.comment_body)
+        sys.exit()
     # see list of pull commits, including info about the ref of the branch
     # it was created for.
     # https://api.github.com/repos/candlepin/subscription-manager/pulls?open
@@ -474,3 +514,6 @@ def main():
         if args.pr_review_comments:
             pr_review_comments = github_api.get_pull_request_review_comments(pull_request)
             show_pull_request_review_comments(pr_review_comments, pull_request)
+
+if __name__ == "__main__":
+    main()
