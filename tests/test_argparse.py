@@ -10,11 +10,12 @@ class TestArgs(unittest.TestCase):
 
     def _parse_args(self, arg_string):
         self.args = parse_args(arg_string.split())
+        #print self.args
 
     def _assert_defaults(self):
-        self.assertEquals(None, self.args.pr_number)
-        self.assertEquals(None, self.args.pr_owner)
-        self.assertEquals(None, self.args.pr_repo)
+        self.assertTrue(self.args.pr_review_comments)
+        self.assertTrue(self.args.pr_comments)
+        self.assertFalse(self.args.debug)
 
     def test_no_args(self):
         self._parse_args("")
@@ -22,12 +23,20 @@ class TestArgs(unittest.TestCase):
     def test_debug(self):
         self._parse_args("-d")
         self.assertTrue(self.args.debug)
-        self._assert_defaults()
+        self.assertTrue(self.args.pr_review_comments)
+        self.assertFalse(self.args.pr_comments)
 
     def test_pr_comments(self):
         self._parse_args("-c")
         self.assertTrue(self.args.pr_comments)
         self._assert_defaults()
+
+    def test_comment(self):
+        self._parse_args("comment filename lineno fooo")
+        self.assertEquals("comment", self.args.subparser_name)
+        self.assertEquals("filename", self.args.comment_filename)
+        self.assertEquals("lineno", self.args.comment_lineno)
+        self.assertEquals('fooo', self.args.comment_body)
 
     def test_owner_repo_pr(self):
         self._parse_args("pr someowner somerepo 37")
