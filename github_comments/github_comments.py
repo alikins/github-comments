@@ -380,7 +380,7 @@ def parse_args(args_list=None):
     global_parser.add_argument("-c", "--pr-comments", dest="pr_comments",
                                action="store_true")
     global_parser.add_argument("-d", "--debug", dest="debug",
-                               action="store_true")
+                               action="store_true", default=False)
 
     global_args, unknown_args = global_parser.parse_known_args(args_list)
 
@@ -388,6 +388,10 @@ def parse_args(args_list=None):
         unknown_args.insert(1, "automode")
 
     parser = argparse.ArgumentParser(parents=[global_parser])
+
+    # reset the new parser with the values parsed from the first pass
+    parser.set_defaults(**vars(global_args))
+
     subparsers = parser.add_subparsers(help='sub commands', dest="subparser_name")
 
     # github-comments comment somefile 37 "this is the rest of the comment"
