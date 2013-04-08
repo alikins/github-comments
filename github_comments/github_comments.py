@@ -237,7 +237,9 @@ class PullRequestList(object):
         for file_data in results['files']:
             if file_data['filename'] in file_to_diff:
                 print "ugh, wtf"
-            file_to_diff[file_data['filename']] = file_data['patch']
+            # renames etc do not have a 'patch' field
+            if 'patch' in file_data:
+                file_to_diff[file_data['filename']] = file_data['patch']
 
         return file_to_diff
 
