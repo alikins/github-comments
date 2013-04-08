@@ -10,7 +10,7 @@ Usage
 ====
 
 ```
-github-comments repo_user repo_name pull_request_number
+github-comments pr repo_user repo_name pull_request_number
 ```
 
 or, if you are on a branch that has had pull requested
@@ -39,7 +39,7 @@ The fields are:
 - the pull request number
 - the body of the comment, text'ified and possibly multiline
 
-If the ```--pr-comments``` flag will include comments
+If the ```--pr-comments``` or `-c` flag will include comments
 made on the pull request itself, that will use the
 repo_name as the "filename", and an empty line number.
 
@@ -73,18 +73,23 @@ Options:
   --no-review-comments
   -c, --pr-comments
   -d, --debug
-  -a, --authenticate
+Subcommands:
+  auth     ask for and save user auth info
+  comment  create a pull request review comment
+  pr  [owner] [repo] [pull request number]
+            get comments on a particular pull request
+  automode  detect pull request to get info for (default)
 ```
 
 For example,
 ```
-    github-comments alikins github-comments 3
+    github-comments pr alikins github-comments 3
 ```
 
 Will show the review comments for pull request number 3
 of the github-comments repo.
 
-Adding the --pr-comments will also include the non
+Adding the --pr-comments or -c  will also include the non
 patch specific comments made on the pull request.
 
 Using with Vim
