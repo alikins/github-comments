@@ -2,9 +2,11 @@
 #
 # mostly wrappers around cli invocations
 
+import logging
 import subprocess
 import sys
 
+log = logging.getLogger(__name__)
 
 # I love regular expressions as much as the next guy, but
 # sometimes I just dont want to use them
@@ -41,6 +43,8 @@ def find_github_repos():
         else:
             name = name_dot_git
         github_repos.add((owner_name, name))
+
+    log.debug("find_github_repos github_repos=%s", github_repos)
     return github_repos
 
 
@@ -51,6 +55,9 @@ def get_branch_ref():
     process = subprocess.Popen(['/usr/bin/git', 'rev-parse', '--abbrev-ref', 'HEAD'],
                                stdout=subprocess.PIPE)
     this_branch = process.communicate()[0]
+
+    log.debug("get_branch_ref=%s", this_branch)
+
     return this_branch.strip()
 
 
@@ -66,6 +73,11 @@ def get_remote_branch_ref(local_ref):
         sys.stderr.write("No merge ref found for %s\n (no config set for %s) " %
                         (local_ref, branch_config_key))
         return local_ref
+
+    log.debug("remote_merge_ref_full=%s", remote_merge_ref_full)
     # needs to skip remote name here as well
     remote_ref = remote_merge_ref_full[len('refs/heads/'):]
+
+    log.debug("remote_ref=%s", remote_ref)
+
     return remote_ref.strip()

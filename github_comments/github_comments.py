@@ -51,7 +51,7 @@ import gfm
 import github_auth
 import git_util
 
-log = logging.getLogger("github-comments")
+log = logging.getLogger(__name__)
 logging.basicConfig()
 
 # git hub api comment content types stuff doesnt work
@@ -87,6 +87,8 @@ class GithubApi(object):
 
         self.update_auth()
 
+        log.debug("GithubApi host=%s, auth=%s", self.host, self.auth)
+
     def add_auth_to_session(self):
         # attach auth info
         # new session with new auth
@@ -100,9 +102,11 @@ class GithubApi(object):
             return
 
         data = {'scopes': ['public_repo'],
-                'note': 'github-comments'}
+                'note': 'github-comments',
+                'note_url': 'https://github.com/alikins/github-comments'}
 
         oauth_info = self.post_authorizations(data=data)
+        log.debug(oauth_info)
         oauth_token = oauth_info['token']
 
         self.auth = github_auth.GithubOauth2Auth(oauth_token)
@@ -122,14 +126,13 @@ class GithubApi(object):
 
         url = full_url or "https://%s/%s" % (self.host, url)
         r = self.session.get(url)
-        if self.debug:
-            # move to using a logger
-            sys.stderr.write("auth: %s\n" % self.auth)
+
+        log.debug("auth=%s", self.auth)
+
         if 'next' in r.links:
             next_data = self.get_url(full_url=r.links['next']['url'])
             data = r.json()
-            if self.debug:
-                sys.stderr.write("%s\n" % pp(data))
+
             if isinstance(data, types.DictType):
                 return data.update(next_data)
             if isinstance(data, types.ListType):
@@ -194,7 +197,6 @@ class PullRequest(object):
     @classmethod
     def create_by_number(cls, github_api, repo_owner, repo_name, pr_number):
         pr = github_api.get_pull_request(repo_owner, repo_name, pr_number)
-        print "pr", pr
         return cls(repo_owner, repo_name, pr['number'], data=pr)
 
 
@@ -419,8 +421,9 @@ def parse_args(args_list=None):
     # ugh, no default subcommand
     args = parser.parse_args(unknown_args)
     if args.debug:
-        log.setLevel(logging.DEBUG)
-        log.debug("args: %s\n" % args)
+        # Set root logger to DEBUG
+        logging.getLogger().setLevel(logging.DEBUG)
+        log.debug("args=%s", args)
 
     return args
 
@@ -503,6 +506,8 @@ def main():
                                                         args.comment_lineno,
                                                         args.comment_body)
         sys.exit()
+
+
     # see list of pull commits, including info about the ref of the branch
     # it was created for.
     # https://api.github.com/repos/candlepin/subscription-manager/pulls?open
