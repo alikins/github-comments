@@ -2,12 +2,17 @@
 
 
 class GithubAuth(object):
+    auth_type = None
+
     def __init__(self):
         pass
 
     def add_to_session(self, requests_session):
         requests_session.auth = None
 
+    def __repr__(self):
+        return "%s(auth_type=%s)" % (self.__class__.__name__,
+                                     self.auth_type)
 
 class GithubNoAuth(GithubAuth):
     auth_type = "no_auth"
