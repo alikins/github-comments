@@ -273,6 +273,7 @@ def find_comment_line(comment, pull_request):
     # distance_from_p_to_header
 
     count = 0
+    new_start = None
     for line in reversed(diff_hunk_lines[:p]):
         # we found a header line
         if line[:2] == "@@":
@@ -286,6 +287,10 @@ def find_comment_line(comment, pull_request):
         # dont count '-' lines
         if line[0] in ['+', ' ']:
             count += 1
+
+    if new_start is None:
+        return None
+
     comment_line = int(new_start) + count
     return comment_line
 
