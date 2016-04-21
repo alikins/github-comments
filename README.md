@@ -55,6 +55,10 @@ To get automatic mode to work, you need:
 - The merge url needs to be a github repo
 - The repo needs to have open pull requests against it
 
+Or:
+
+- The branch is a pull request fetched from origin with a name in the
+  format 'pr-1234'. 'pr', a '-', and the pr number.
 
 Installation
 ============
@@ -90,7 +94,8 @@ Will show the review comments for pull request number 3
 of the github-comments repo.
 
 Adding the --pr-comments or -c  will also include the non
-patch specific comments made on the pull request.
+patch specific comments made on the pull request. ie,
+the 'Conversation' comments on the github pull request page.
 
 Using with Vim
 ==============
@@ -132,8 +137,10 @@ with github-comments.
 Authentication
 ==============
 
-No authentication, basic auth, and oauth2
-are supported.
+The supported authentication modes are:
+- No authentication
+- basic auth
+- oauth2
 
 Default authentication is no authentication.
 
@@ -179,4 +186,14 @@ Deps
 - requests http://python-requests.org/
 - markdown https://pypi.python.org/pypi/Markdown
 
+To do
+=====
 
+- Improve and hopefully simplify the 'automatic' mode.
+- port to use a 3rd party python github module for API
+  use instead of the current home rolled and very limited one.
+- Find/show commit comments
+- Find/show comments on issues reference that pull request?
+- a script to do the vim invocation
+- add a followable link to the github url somehow
+- eventually make api request calls async

@@ -197,6 +197,7 @@ class PullRequest(object):
     @classmethod
     def create_by_number(cls, github_api, repo_owner, repo_name, pr_number):
         pr = github_api.get_pull_request(repo_owner, repo_name, pr_number)
+        log.debug('create_by_number=%s', pprint.pformat(pr))
         return cls(repo_owner, repo_name, pr['number'], data=pr)
 
 
@@ -305,6 +306,10 @@ def format_comment_body(comment):
     return body_text
 
 
+def sort_comments(comments):
+    return sorted(comments, key=operator.itemgetter('path', '__comment_line', 'id'))
+
+
 def show_pull_request_review_comments(comments, pull_request):
     # unified diff chunk header
     # lets sort the comments by path
@@ -316,22 +321,28 @@ def show_pull_request_review_comments(comments, pull_request):
     # sort by file path
 
     comments.sort(key=operator.itemgetter('path'))
+
+    valid_comments = []
     for comment in comments:
         comment_line = find_comment_line(comment, pull_request)
         if comment_line is None:
             # no comment applies
             continue
+        comment['__comment_line'] = comment_line
+        valid_comments.append(comment)
 
+    for comment in sort_comments(valid_comments):
         body_text = format_comment_body(comment)
         # this is less broken now
-        print u"%s:%s:%s:pr%s: %s" % (comment['path'], comment_line,
+        print u"%s:%s:%s:pr%s: %s" % (comment['path'],
+                                      comment['__comment_line'],
                                       comment['user']['login'],
                                       pull_request.pr_number,
                                       body_text)
 
 
-def show_pull_request_comments(comments, pull_request):
-    for comment in comments:
+def show_pull_request_comments(comments, pull_request, sort=None):
+    for comment in sort_comments(comments):
         body_text = format_comment_body(comment)
         print u"%s:%s:pr%s: %s" % (pull_request.repo_name,
                                    comment['user']['login'],
@@ -433,6 +444,55 @@ def parse_args(args_list=None):
     return args
 
 
+def automatic_pr_guess(pull_requests):
+    # well then, let's guess!
+
+    # local branch name
+    local_ref_name = git_util.get_branch_ref()
+
+    # look up the merge ref, if we dont have one, skip it.
+    # we could probably take some guesss...
+
+    # FIXME: this assumes local pr checkout branch is 'pr-12312' format
+    if local_ref_name.startswith('pr-'):
+        pr_number = local_ref_name[3:]
+        github_repos = git_util.find_github_repos()
+        log.debug('github_repos=%s', github_repos)
+
+        most_likely_repo = None
+        # Just a guess...
+        for github_repo in github_repos:
+            if github_repo[0] == 'origin':
+                most_likely_repo = github_repo
+
+        # start with the first item in github_repos
+        if not most_likely_repo:
+            log.debug('no most_likely_repo')
+            return pull_requests
+
+        github_repo_owner, github_repo_name = most_likely_repo[1:]
+        pull_requests.add_pr_by_number(github_repo_owner, github_repo_name, pr_number)
+        return pull_requests
+
+    remote_ref_name = git_util.get_remote_branch_ref(local_ref_name)
+
+    # lets find all the github repo's this could be a branch of,
+    # ignoring multiple remote names for the same repo
+    github_repos = git_util.find_github_repos()
+    log.debug('github_repos=%s', github_repos)
+
+    for github_repo in github_repos:
+        repo_owner, repo_name = github_repo
+
+        # does it make sense to support multiple per requests per
+        # branch? Suppose you can push a branch to a fork, and then
+        # make multiple pull requests to different upstreams?
+        pull_requests.find_prs_for_ref(repo_owner, repo_name,
+                                        remote_ref_name)
+
+    return pull_requests
+
+
 def main():
     repo_name = None
     repo_owner = None
@@ -470,6 +530,7 @@ def main():
                            debug=args.debug)
 
     pull_requests = PullRequestList(github_api)
+
     # clearly not the most rebust arg handling yet
     if args.subparser_name == 'pr':
         try:
@@ -484,34 +545,13 @@ def main():
             raise
 
     if args.subparser_name == 'automode':
-        # well then, let's guess!
-
-        # local branch name
-        local_ref_name = git_util.get_branch_ref()
-
-        # look up the merge ref, if we dont have one, skip it.
-        # we could probably take some guesss...
-        remote_ref_name = git_util.get_remote_branch_ref(local_ref_name)
-
-        # lets find all the github repo's this could be a branch of,
-        # ignoring multiple remote names for the same repo
-        github_repos = git_util.find_github_repos()
-
-        for github_repo in github_repos:
-            repo_owner, repo_name = github_repo
-
-            # does it make sense to support multiple per requests per
-            # branch? Suppose you can push a branch to a fork, and then
-            # make multiple pull requests to different upstreams?
-            pull_requests.find_prs_for_ref(repo_owner, repo_name,
-                                           remote_ref_name)
+        pull_requests = automatic_pr_guess(pull_requests)
 
     if args.subparser_name == 'comment':
         print "look, I'm adding a comment! %s %s %s" % (args.comment_filename,
                                                         args.comment_lineno,
                                                         args.comment_body)
         sys.exit()
-
 
     # see list of pull commits, including info about the ref of the branch
     # it was created for.

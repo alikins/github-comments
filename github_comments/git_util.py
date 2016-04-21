@@ -23,9 +23,14 @@ def find_github_repos():
         key, value = config_line.split('=', 1)
         if not key.endswith('.url'):
             continue
+
         # verify this is a github repo
         if 'github.com' not in value:
             continue
+
+        parts = key.split('.')
+        remote_name = parts[1]
+
         repo_url = value
         if repo_url.startswith("git@"):
             repo_url_parts = repo_url.rsplit('/', 1)
@@ -42,9 +47,10 @@ def find_github_repos():
             name = name_dot_git[:-4]
         else:
             name = name_dot_git
-        github_repos.add((owner_name, name))
+        github_repos.add((remote_name, owner_name, name))
 
     log.debug("find_github_repos github_repos=%s", github_repos)
+    # TODO: sort this so most likely origin is first
     return github_repos
 
 
