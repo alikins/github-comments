@@ -146,7 +146,7 @@ class GithubApi(object):
              pull_request.pr_number)
         # I was hoping this would render the markdown to text, but that
         # does not appear to be the case.
-        #headers = {'Accept': 'application/vnd.github.v3.text+json',
+        # headers = {'Accept': 'application/vnd.github.v3.text+json',
         #           'User-Agent': 'git-comments via python requests'}
 
         r_comments = self.get_url(url)
@@ -157,10 +157,6 @@ class GithubApi(object):
             (pull_request.repo_owner,
              pull_request.repo_name,
              pull_request.pr_number)
-        # I was hoping this would render the markdown to text, but that
-        # does not appear to be the case.
-        #headers = {'Accept': 'application/vnd.github.v3.text+json',
-        #           'User-Agent': 'git-comments via python requests'}
 
         r_comments = self.get_url(url)
         return r_comments
@@ -257,7 +253,7 @@ def find_comment_line(comment, pull_request):
     Returns an int linenumber if the comment applies, None
     otherwise
     """
-    #op = int(comment['original_position'])
+    # op = int(comment['original_position'])
     if comment['position']:
         p = int(comment['position'])
     else:
@@ -488,7 +484,7 @@ def automatic_pr_guess(pull_requests):
         # branch? Suppose you can push a branch to a fork, and then
         # make multiple pull requests to different upstreams?
         pull_requests.find_prs_for_ref(repo_owner, repo_name,
-                                        remote_ref_name)
+                                       remote_ref_name)
 
     return pull_requests
 

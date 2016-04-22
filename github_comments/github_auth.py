@@ -14,6 +14,7 @@ class GithubAuth(object):
         return "%s(auth_type=%s)" % (self.__class__.__name__,
                                      self.auth_type)
 
+
 class GithubNoAuth(GithubAuth):
     auth_type = "no_auth"
     """unauthenticated access"""

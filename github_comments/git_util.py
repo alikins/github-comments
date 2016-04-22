@@ -8,6 +8,7 @@ import sys
 
 log = logging.getLogger(__name__)
 
+
 # I love regular expressions as much as the next guy, but
 # sometimes I just dont want to use them
 def find_github_repos():
@@ -77,7 +78,7 @@ def get_remote_branch_ref(local_ref):
 
     if process.returncode > 0:
         sys.stderr.write("No merge ref found for %s\n (no config set for %s) " %
-                        (local_ref, branch_config_key))
+                         (local_ref, branch_config_key))
         return local_ref
 
     log.debug("remote_merge_ref_full=%s", remote_merge_ref_full)

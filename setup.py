@@ -14,7 +14,7 @@ setup(name="github-comments",
                         'markdown',
                         'requests'
                         ],
-      #scripts=["scripts/github-comments"],)
+      # scripts=["scripts/github-comments"],)
       entry_points={'console_scripts':
                     ['github-comments = github_comments.github_comments:main']}
       )
